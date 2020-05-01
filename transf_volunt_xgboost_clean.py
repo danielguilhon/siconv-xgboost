@@ -142,7 +142,7 @@ gs=GridSearchCV(clf, param_grid, scoring='roc_auc', n_jobs=-1, cv=kf, verbose=Fa
 gs.fit(X_train_cv, y_train_cv)
 
 #%%###################   RANDOM SEARCH   ################
-n_iter=10
+n_iter=20
 param_grid_rand={'learning_rate': np.logspace(-3, 0, 10),
                  'max_depth':  randint(2,14),
                  'n_estimators': randint(50,250),
@@ -171,12 +171,12 @@ def gb_recall_cv(params, random_state=seed, cv=kf, X=X_train_cv, y=y_train_cv):
                 'gamma': params['gamma'],
                 'colsample_bytree': params['colsample_bytree'],
                 'alpha': int(params['alpha']),
-                'lambda': params['lambda']
+                'lambda': params['lambda'],
+                'scale_pos_weight': params['scale_pos_weight']
              }
     
     # we use this params to create a new LGBM Regressor
     model = XGBClassifier(**params,
-                scale_pos_weight = 20,
                 objective = 'binary:logistic',
                 eval_metric= 'auc',
                 nthread=4,
@@ -189,6 +189,10 @@ def gb_recall_cv(params, random_state=seed, cv=kf, X=X_train_cv, y=y_train_cv):
 
 # %%
 # possible values of parameters
+# sum(negative instances) / sum(positive instances)
+# scale_pos_weight eh a proporcao neg/ pos
+neg_pos_rate = 20
+
 space={ 'n_estimators': hp.uniformint('n_estimators', 50, 250),
         'max_depth' : hp.uniformint('max_depth', 1, 14),
         'learning_rate': hp.loguniform('learning_rate', -5, 0),
@@ -197,7 +201,8 @@ space={ 'n_estimators': hp.uniformint('n_estimators', 50, 250),
         'gamma': hp.uniform('gamma', 0.5, 1.2),
         'colsample_bytree': hp.uniform('colsample_bytree', 0.7, 1.0),
         'alpha': hp.uniformint('alpha', 1, 2),
-        'lambda': hp.uniform('lambda', 1.0, 2.0)
+        'lambda': hp.uniform('lambda', 1.0, 2.0),
+        'scale_pos_weight': neg_pos_rate
       }
 
 # trials will contain logging information
@@ -213,12 +218,40 @@ best=fmin(fn=gb_recall_cv, # function to optimize
     )
 #%%
 # computing the score on the test set
-model = XGBClassifier(random_state=seed, n_estimators=int(best['n_estimators']),
-                      max_depth=int(best['max_depth']),learning_rate=best['learning_rate'])
+best_params = { 'n_estimators': int(best['n_estimators']), 
+                'max_depth': int(best['max_depth']), 
+                'learning_rate': best['learning_rate'],
+                'min_child_weight': int(best['min_child_weight']),
+                'subsample': best['subsample'],
+                'gamma': best['gamma'],
+                'colsample_bytree': best['colsample_bytree'],
+                'alpha': int(best['alpha']),
+                'lambda': best['lambda'],
+             }
+model = XGBClassifier(**best_params,
+                        objective = 'binary:logistic',
+                        eval_metric= 'auc',
+                        nthread=4,
+                        scale_pos_weight=neg_pos_rate,
+                        seed=seed
+                    )
 
 score = cross_validate(model, X_train_cv, y_train_cv, cv=kf, scoring=['roc_auc','precision','recall'], n_jobs=-1)
+
+# %%
 print('XGBoost AUC: %r' % (score['test_roc_auc'].mean()))
 print('XGBoost Precision: %r' % (score['test_precision'].mean()))
 print('XGBoost Recall: %r' % (score['test_recall'].mean()))
+print("Best Recall {:.3f} params {}".format( score['test_recall'].mean(), best))
 
-print("Best Recall {:.3f} params {}".format( gb_recall_cv(best), best))
+# %%
+tpe_results=np.array([[-x['result']['loss'],
+                      x['misc']['vals']['learning_rate'][0],
+                      x['misc']['vals']['max_depth'][0],
+                      x['misc']['vals']['n_estimators'][0]] for x in trials.trials])
+
+tpe_results_df=pd.DataFrame(tpe_results,
+                           columns=['score', 'learning_rate', 'max_depth', 'n_estimators'])
+tpe_results_df.plot(subplots=True,figsize=(10, 10))
+
+# %%
