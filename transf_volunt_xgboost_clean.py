@@ -11,6 +11,7 @@ import statistics
 import numpy as np
 import pandas as pd
 from scipy.stats import randint
+from numpy.random import RandomState
 
 import xgboost as xgb
 from xgboost import XGBClassifier
@@ -35,6 +36,7 @@ from sklearn.metrics import precision_score
 from sklearn.metrics import recall_score
 from sklearn.metrics import roc_auc_score
 from sklearn.metrics import f1_score
+from sklearn.metrics import precision_recall_curve
 
 from hyperopt import fmin, tpe, hp, anneal, Trials
 
@@ -189,6 +191,7 @@ rs_results_df=pd.DataFrame(np.transpose([rs.cv_results_['mean_test_score'],
 rs_results_df.plot(subplots=True,figsize=(10, 10))
 
 #%%###################   Tree-structured Parzen Estimator   ################
+## funcao a ser minimizada - retorna valor negativo pois trata-se do recall
 def gb_recall_cv(params, random_state=seed, cv=kf, X=X_train_cv, y=y_train_cv):
     # the function gets a set of variable parameters in "param"
     params = {  'n_estimators': int(params['n_estimators']), 
@@ -206,21 +209,21 @@ def gb_recall_cv(params, random_state=seed, cv=kf, X=X_train_cv, y=y_train_cv):
     # we use this params to create a new LGBM Regressor
     model = XGBClassifier(**params,
                 objective = 'binary:logistic',
-                eval_metric= 'auc',
+                #eval_metric= 'auc',
                 nthread=4,
                 seed=random_state)
     
     # and then conduct the cross validation with the same folds as before
-    score = -cross_val_score(model, X, y, cv=cv, scoring="recall", n_jobs=-1).mean()
+    #opcoes de scoring: average_precision (simula aucpr), roc_auc, recall, precision, f1
+    score = -cross_val_score(model, X, y, cv=cv, scoring="average_precision", n_jobs=-1).mean()
 
     return score
 
 # %%
-# possible values of parameters
 # sum(negative instances) / sum(positive instances)
 # scale_pos_weight eh a proporcao neg/ pos
 neg_pos_rate = 20
-
+# espaco de busca
 space={ 'n_estimators': hp.uniformint('n_estimators', 50, 250),
         'max_depth' : hp.uniformint('max_depth', 1, 14),
         'learning_rate': hp.loguniform('learning_rate', -5, 0),
@@ -235,16 +238,26 @@ space={ 'n_estimators': hp.uniformint('n_estimators', 50, 250),
 
 # trials will contain logging information
 trials = Trials()
-#%%
-##%%timeit -n1 -r1 
-best = fmin(fn=gb_recall_cv, # function to optimize
+
+best_tpe = fmin(fn=gb_recall_cv, # function to optimize
     space=space, #search space
     algo=tpe.suggest, # optimization algorithm, hyperotp will select its parameters automatically
     max_evals=n_iter, # maximum number of iterations
     trials=trials, # logging
-    rstate=np.random.RandomState(seed) # fixing random state for the reproducibility
+    rstate= RandomState(seed) # fixing random state for the reproducibility
     )
 
+best = best_tpe
+
+best_anneal = fmin(fn=gb_recall_cv, # function to optimize
+    space=space, #search space
+    algo=anneal.suggest, # optimization algorithm, hyperotp will select its parameters automatically
+    max_evals=n_iter, # maximum number of iterations
+    trials=trials, # logging
+    rstate= RandomState(seed) # fixing random state for the reproducibility
+    )
+
+best = best_anneal
 # computing the score on the test set
 best_params = { 'n_estimators': int(best['n_estimators']), 
                 'max_depth': int(best['max_depth']), 
@@ -258,24 +271,26 @@ best_params = { 'n_estimators': int(best['n_estimators']),
              }
 model = XGBClassifier(**best_params,
                         objective = 'binary:logistic',
-                        eval_metric= 'auc',
+                        eval_metric= 'aucpr',
                         nthread=4,
                         scale_pos_weight=neg_pos_rate,
                         seed=seed
                     )
 
-#score = cross_validate(model, X_train_cv, y_train_cv, cv=kf, scoring=['roc_auc','precision','recall'], n_jobs=-1)
 model.fit(X_train_cv, y_train_cv)
 clf_pred_test = model.predict(X_test)
 clf_pred_proba_test = model.predict_proba(X_test)
 
-tn, fp, fn, tp = confusion_matrix(y_test, clf_pred_test).ravel()
+acc, prec, rec, spec, f_m = CalculaScores(y_test, clf_pred_test)
+auc = roc_auc_score(y_test, clf_pred_proba_test[:,1])
 
 # %%
-print("XGBoost AUC: {:.3f}".format(score['test_roc_auc'].mean()))
-print("XGBoost Precision: {:.3f}".format(score['test_precision'].mean()))
-print("XGBoost Recall: {:.3f}".format(score['test_recall'].mean()))
-print("Best Recall {:.3f} params {}".format( score['test_recall'].mean(), best))
+print("XGBoost AUC: {:.3f}".format(auc))
+print("XGBoost Accuracy: {:.3f}".format(acc))
+print("XGBoost Precision: {:.3f}".format(prec))
+print("XGBoost Recall: {:.3f}".format(rec))
+print("XGBoost Specificity: {:.3f}".format(spec))
+print("XGBoost F-Measure: {:.3f}".format(f_m))
 
 # %%
 tpe_results=np.array([[-x['result']['loss'],
@@ -286,5 +301,16 @@ tpe_results=np.array([[-x['result']['loss'],
 tpe_results_df=pd.DataFrame(tpe_results,
                            columns=['score', 'learning_rate', 'max_depth', 'n_estimators'])
 tpe_results_df.plot(subplots=True,figsize=(10, 10))
+
+# %%
+from sklearn.metrics import plot_precision_recall_curve
+from sklearn.metrics import plot_roc_curve
+
+# %%
+plot_roc_curve(model, X_test, y_test)
+
+# %%
+plot_precision_recall_curve(model, X_test, y_test)
+
 
 # %%
