@@ -16,6 +16,8 @@ from numpy.random import RandomState
 import xgboost as xgb
 from xgboost import XGBClassifier
 
+from sklearn.preprocessing import StandardScaler
+
 from sklearn.linear_model import LogisticRegression
 
 from sklearn.model_selection import train_test_split
@@ -37,6 +39,9 @@ from sklearn.metrics import recall_score
 from sklearn.metrics import roc_auc_score
 from sklearn.metrics import f1_score
 from sklearn.metrics import precision_recall_curve
+from sklearn.metrics import plot_precision_recall_curve
+from sklearn.metrics import plot_roc_curve
+from sklearn.metrics import classification_report
 
 from hyperopt import fmin, tpe, hp, anneal, Trials
 
@@ -209,7 +214,7 @@ def gb_recall_cv(params, random_state=seed, cv=kf, X=X_train_cv, y=y_train_cv):
     # we use this params to create a new LGBM Regressor
     model = XGBClassifier(**params,
                 objective = 'binary:logistic',
-                #eval_metric= 'auc',
+                eval_metric= 'aucpr',
                 nthread=4,
                 seed=random_state)
     
@@ -239,25 +244,17 @@ space={ 'n_estimators': hp.uniformint('n_estimators', 50, 250),
 # trials will contain logging information
 trials = Trials()
 
-best_tpe = fmin(fn=gb_recall_cv, # function to optimize
+#opcoes para otimizacao sao tpe.suggest e anneal.suggest
+otimiza = anneal.suggest
+
+best = fmin(fn=gb_recall_cv, # function to optimize
     space=space, #search space
-    algo=tpe.suggest, # optimization algorithm, hyperotp will select its parameters automatically
+    algo=otimiza, # optimization algorithm, hyperotp will select its parameters automatically
     max_evals=n_iter, # maximum number of iterations
     trials=trials, # logging
     rstate= RandomState(seed) # fixing random state for the reproducibility
     )
 
-best = best_tpe
-
-best_anneal = fmin(fn=gb_recall_cv, # function to optimize
-    space=space, #search space
-    algo=anneal.suggest, # optimization algorithm, hyperotp will select its parameters automatically
-    max_evals=n_iter, # maximum number of iterations
-    trials=trials, # logging
-    rstate= RandomState(seed) # fixing random state for the reproducibility
-    )
-
-best = best_anneal
 # computing the score on the test set
 best_params = { 'n_estimators': int(best['n_estimators']), 
                 'max_depth': int(best['max_depth']), 
@@ -284,7 +281,6 @@ clf_pred_proba_test = model.predict_proba(X_test)
 acc, prec, rec, spec, f_m = CalculaScores(y_test, clf_pred_test)
 auc = roc_auc_score(y_test, clf_pred_proba_test[:,1])
 
-# %%
 print("XGBoost AUC: {:.3f}".format(auc))
 print("XGBoost Accuracy: {:.3f}".format(acc))
 print("XGBoost Precision: {:.3f}".format(prec))
@@ -293,24 +289,17 @@ print("XGBoost Specificity: {:.3f}".format(spec))
 print("XGBoost F-Measure: {:.3f}".format(f_m))
 
 # %%
-tpe_results=np.array([[-x['result']['loss'],
+# plotting the results of optimization
+hyperopt_results=np.array([[-x['result']['loss'],
                       x['misc']['vals']['learning_rate'][0],
                       x['misc']['vals']['max_depth'][0],
+                      x['misc']['vals']['min_child_weight'][0],
                       x['misc']['vals']['n_estimators'][0]] for x in trials.trials])
 
-tpe_results_df=pd.DataFrame(tpe_results,
-                           columns=['score', 'learning_rate', 'max_depth', 'n_estimators'])
-tpe_results_df.plot(subplots=True,figsize=(10, 10))
-
-# %%
-from sklearn.metrics import plot_precision_recall_curve
-from sklearn.metrics import plot_roc_curve
+hyperopt_results_df=pd.DataFrame(hyperopt_results,
+                           columns=['score', 'learning_rate', 'max_depth', 'min_child_weight', 'n_estimators'])
+hyperopt_results_df.plot(subplots=True,figsize=(10, 10))
 
 # %%
 plot_roc_curve(model, X_test, y_test)
-
-# %%
 plot_precision_recall_curve(model, X_test, y_test)
-
-
-# %%
