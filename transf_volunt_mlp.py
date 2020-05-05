@@ -8,19 +8,17 @@ Created on Tue Apr 28 15:04:54 2020
 #%% imports
 import pickle
 import numpy as np
+import matplotlib.pyplot as plt
 from numpy.random import RandomState
 from functools import partial
-import matplotlib.pyplot as plt
 
 from sklearn.preprocessing import StandardScaler
 
-from sklearn.linear_model import LogisticRegression
+from sklearn.neural_network import MLPClassifier
 
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import StratifiedKFold
-from sklearn.model_selection import RandomizedSearchCV
 from sklearn.model_selection import cross_val_score
-from sklearn.model_selection import cross_validate
 
 from sklearn.datasets import load_svmlight_file
 
@@ -45,30 +43,29 @@ def calcula_scores(y_true, model_prediction):
 
     return accuracy, precision, recall, specificity, f_measure
 
-def logit_cv(params, random_state, cv, X, y):
+def mlp_cv(params, random_state, cv, X, y):
     # funcao utilizada pelo Hyperopt fmin
     # recebe os params vindo do espaco de busca de hiperparametros
     
-    params = {  'C': params['C'], 
-                'intercept_scaling': params['intercept_scaling'],
-                'penalty': params['penalty'], # normalizacao L1 ou L2 utilizada
-                'l1_ratio': params['l1_ratio'] # taxa de normalizacao
+    params = {
+            'hidden_layer_sizes': params['hidden_layer_sizes'],
+            'alpha': params['alpha'],
+            'activation': params['activation'],
+            'solver': params['solver']
              }
     
     # utilizamos os parametros passados para criar o modelo
-    model = LogisticRegression(
+    model = MLPClassifier(
                 **params,
-                random_state=seed, # para ser reproduzivel
-                solver='saga',  # algoritmo de otimizacao utilizado
-                class_weight = 'balanced' #dá o devido peso ao balanceamento entre classes
                 )
     
     # faz o cross_validation
-    # devemos retornar negativo pois a metrica e minimizada pelo fmin do hyperopt
+    # devemos retornar negativo pois a metrica eh minimizada pelo fmin do hyperopt
     # opcoes de scoring: average_precision (simula aucpr), roc_auc, recall, precision, f1
     score = -cross_val_score(model, X, y, cv=cv, scoring="average_precision", n_jobs=-1).mean()
 
     return score
+
 
 #%%%%%%%%%%%%%%%%% TRAIN %%%%%%%%%%%%%%%%%%%%%%
 #seed a ser utilizada para replicação
@@ -87,95 +84,119 @@ X_data, y_data = load_svmlight_file('desbalanceado_onehot_all.svm', n_features =
 scaler = StandardScaler(with_mean=False)
 X_data = scaler.fit_transform(X_data)
 
-#faz o split entre treino/validacao e teste
+#faz o split entre treino/validacao e teste (hold-out)
 #stratify mantem a proporcao entre classes pos/neg
 X_train_cv, X_test, y_train_cv, y_test = train_test_split(X_data, y_data, test_size=0.1, random_state=seed, stratify=y_data)
 
 # %%
 # fazemos um teste inicial com o modelo em configuracao padrao
-clf_logit = LogisticRegression(
+clf_mlp = MLPClassifier(
                 random_state=seed,
-                solver='saga', 
-                class_weight = 'balanced'
+                hidden_layer_sizes=(100,),
+                activation="relu", 
+                solver='adam', 
+                alpha=0.0001, 
+                batch_size='auto', 
+                learning_rate="constant", 
+                learning_rate_init=0.001, 
+                power_t=0.5, max_iter=200, 
+                shuffle=True, 
+                tol=1e-4, 
+                momentum=0.9, 
+                nesterovs_momentum=True, 
+                validation_fraction=0.1, 
+                beta_1=0.9, 
+                beta_2=0.999, 
+                epsilon=1e-8,
+                early_stopping=True,
+                n_iter_no_change=10
                 )
 
-#score = cross_validate(clf_logit, X_train_cv, y_train_cv, cv=kf, scoring=['roc_auc','precision','recall'], n_jobs=-1)
-clf_logit.fit(X_train_cv, y_train_cv)
+#score = cross_validate(clf_mlp, X_train_cv, y_train_cv, cv=kf, scoring=['roc_auc','precision','recall'], n_jobs=-1)
+clf_mlp.fit(X_train_cv, y_train_cv)
 
-# apops o treino, realizamos previsoes com os dados de teste
-clf_pred_test = clf_logit.predict(X_test)
-clf_pred_proba_test = clf_logit.predict_proba(X_test)
+# apos o treino, realizamos previsoes com os dados de teste(hold-out)
+clf_pred_test = clf_mlp.predict(X_test)
+clf_pred_proba_test = clf_mlp.predict_proba(X_test)
 
 acc, prec, rec, spec, f_m = calcula_scores(y_test, clf_pred_test)
 
-print("############ RESULTADOS DO TESTE MODELO PADRÃO #################")
-print("Logit AUC: {:.3f}".format(roc_auc_score(y_test, clf_pred_proba_test[:,1])))
-print("Logit Accuracy: {:.3f}".format(acc))
-print("Logit Precision: {:.3f}".format(prec))
-print("Logit Recall: {:.3f}".format(rec))
-print("Logit Specificity: {:.3f}".format(spec))
-print("Logit F-Measure: {:.3f}".format(f_m))
-print("############ RESULTADOS DO TESTE MODELO PADRÃO #################")
+print("############  RESULTADOS DO TESTE SEM OTIMIZACAO  #################")
+print("MLP AUC: {:.3f}".format(roc_auc_score(y_test, clf_pred_proba_test[:,1])))
+print("MLP Accuracy: {:.3f}".format(acc))
+print("MLP Precision: {:.3f}".format(prec))
+print("MLP Recall: {:.3f}".format(rec))
+print("MLP Specificity: {:.3f}".format(spec))
+print("MLP F-Measure: {:.3f}".format(f_m))
+print("############  RESULTADOS DO TESTE SEM OTIMIZACAO  #################")
 # %%
+# otimizacao de hiperparametros
 # espaco de busca de hiperparametros
-logit_space = {
-    'C': hp.loguniform('C', low=-4*np.log(10), high=4*np.log(10)), #
-    'intercept_scaling': hp.loguniform('intercept_scaling', -8*np.log(10), 8*np.log(10)),
-    'fit_intercept': hp.choice('fit_intercept', [False, True]),
-    'penalty': hp.choice('penalty', ['l1', 'l2']), # normalizacao L1 ou L2 utilizada
-    'l1_ratio': hp.uniform('l1_ratio', 0, 1) # taxa de normalizacao 0 < l1_ratio <1, combinacao L1/L2.
+mlp_space = {
+    'hidden_layer_sizes': hp.uniformint('hidden_layer_sizes', 10, 100),
+    'alpha': hp.loguniform('alpha', -8*np.log(10), 3*np.log(10)),
+    'activation': hp.choice('activation', ['relu', 'logistic', 'tanh']),
+    'solver': hp.choice('solver', ['sgd', 'adam'])
+    # 'learning_rate_init': 0.001, 
+    #             power_t=0.5,
+    #             max_iter=200, 
+    #             shuffle=True, 
+    #             tol=1e-4, 
+    #             momentum=0.9, 
+    #             nesterovs_momentum=True, 
+    #             validation_fraction=0.1, 
+    #             beta_1=0.9, 
+    #             beta_2=0.999, 
+    #             epsilon=1e-8, 
+    #             n_iter_no_change=10
 }
 
 # log das tentativas de otimizacao
-logit_trials = Trials()
+mlp_trials = Trials()
 
-# opcoes para otimizacao sao tpe.suggest e anneal.suggest
+#opcoes para otimizacao sao tpe.suggest e anneal.suggest
 # pela documentacao, anneal tende a convergir melhor, pois faz inferencias com base no historico
-logit_otimiza = anneal.suggest
-
+mlp_otimiza = anneal.suggest
 # partial para passar outros parametros para a funcao objetivo a ser otimizada
-logit_obj = partial(logit_cv, random_state=seed, cv=kf, X=X_train_cv, y=y_train_cv)
+mlp_obj = partial(mlp_cv, random_state=seed, cv=kf, X=X_train_cv, y=y_train_cv)
 
-logit_best = fmin(fn=logit_obj, # funcao para otimizar
-    space=logit_space, #espaco de busca
-    algo=logit_otimiza, # algoritmo de otimizacao que o hyperopt deve utilizar
-    max_evals=n_iter, # numero de rodadas de otimizacao
-    trials=logit_trials, # logging
-    rstate= RandomState(seed) # reprodutibilidade
+mlp_best = fmin(fn=mlp_obj, # function to optimize
+    space=mlp_space, #search space
+    algo=mlp_otimiza, # optimization algorithm, hyperotp will select its parameters automatically
+    max_evals=n_iter, # maximum number of iterations
+    trials=mlp_trials, # logging
+    rstate= RandomState(seed) # fixing random state for the reproducibility
     )
 
 # %%
 #melhores parâmetros encontrados
-best_params = { 'C': logit_best['C'], 
-                'penalty': logit_best['penalty'],
-                'l1_ratio': logit_best['l1_ratio']
-             }
-
-model = LogisticRegression(**best_params,
+best_params = { 
+            'hidden_layer_sizes': mlp_best['hidden_layer_sizes'],
+            'alpha': mlp_best['alpha'],
+            'activation': mlp_best['activation'],
+            'solver': mlp_best['solver']
+            }
+model = MLPClassifier(**best_params,
                         random_state=seed,
-                        n_jobs = -1,
-                        solver='saga',
-                        class_weight = 'balanced',
                     )
 
-# testa os resultados do modelo com os melhores parametros nos dados de teste
 model.fit(X_train_cv, y_train_cv)
+# testa os resultados do modelo com os melhores parametros nos dados de teste
 clf_pred_test = model.predict(X_test)
 clf_pred_proba_test = model.predict_proba(X_test)
 
 acc, prec, rec, spec, f_m = calcula_scores(y_test, clf_pred_test)
 auc = roc_auc_score(y_test, clf_pred_proba_test[:,1])
 
-print("############ RESULTADOS DO TESTE APÓS OTIMIZACAO #################")
+print("############  RESULTADOS DO TESTE APÓS OTIMIZACAO  #################")
 print("Logit AUC: {:.3f}".format(roc_auc_score(y_test, clf_pred_proba_test[:,1])))
 print("Logit Accuracy: {:.3f}".format(acc))
 print("Logit Precision: {:.3f}".format(prec))
 print("Logit Recall: {:.3f}".format(rec))
 print("Logit Specificity: {:.3f}".format(spec))
 print("Logit F-Measure: {:.3f}".format(f_m))
-print("############ RESULTADOS DO TESTE APÓS OTIMIZACAO #################")
 
-
+#%% 
 fpr, tpr, roc_thresh = roc_curve(y_test, clf_pred_proba_test[:,1])
 precision, recall, pr_thresh = precision_recall_curve(y_test, clf_pred_proba_test[:,1])
 avg_precision = average_precision_score(y_test, clf_pred_test, average=None)
