@@ -51,6 +51,7 @@ def logit_cv(params, random_state, cv, X, y):
     
     params = {  'C': params['C'], 
                 'intercept_scaling': params['intercept_scaling'],
+                'fit_intercept': params['fit_intercept'],
                 'penalty': params['penalty'], # normalizacao L1 ou L2 utilizada
                 'l1_ratio': params['l1_ratio'] # taxa de normalizacao
              }
@@ -76,7 +77,7 @@ seed = 6439
 # k-fold estratificado, preserva a proposcao de positivos e negativos
 kf = StratifiedKFold(n_splits=10)
 # controla a quantidade de iteracoes de otimizacao q sera feita pelo Hyperopt
-n_iter = 5
+n_iter = 10
 
 # %%
 #le os dados em formato onehot
@@ -118,6 +119,9 @@ print("Logit F-Measure: {:.3f}".format(f_m))
 print("############ RESULTADOS DO TESTE MODELO PADRÃO #################")
 # %%
 # espaco de busca de hiperparametros
+logit_fit = [False, True]
+logit_penalty = ['l1','l2']
+
 logit_space = {
     'C': hp.loguniform('C', low=-4*np.log(10), high=4*np.log(10)), #
     'intercept_scaling': hp.loguniform('intercept_scaling', -8*np.log(10), 8*np.log(10)),
@@ -147,7 +151,9 @@ logit_best = fmin(fn=logit_obj, # funcao para otimizar
 # %%
 #melhores parâmetros encontrados
 best_params = { 'C': logit_best['C'], 
-                'penalty': logit_best['penalty'],
+                'penalty': logit_penalty[logit_best['penalty']],
+                'intercept_scaling': logit_best['intercept_scaling'],
+                'fit_intercept': logit_fit[logit_best['fit_intercept']],
                 'l1_ratio': logit_best['l1_ratio']
              }
 
@@ -206,3 +212,5 @@ plt.legend(lines, labels, loc=(0, -.38), prop=dict(size=14))
 
 
 plt.show()
+
+# %%

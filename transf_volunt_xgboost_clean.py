@@ -56,7 +56,7 @@ def LoadObj(name):
     with open(name + '.pkl', 'rb') as f:
         return pickle.load(f)
 
-def CalculaScores(y_true, model_prediction):
+def calcula_scores(y_true, model_prediction):
     tn, fp, fn, tp = confusion_matrix(y_true, model_prediction).ravel()
     specificity = tn / (tn+fp)
     accuracy =  (tp+tn) / (tp+tn+fp+fn)
@@ -69,7 +69,12 @@ def CalculaScores(y_true, model_prediction):
 #%%%%%%%%%%%%%%%%% TRAIN %%%%%%%%%%%%%%%%%%%%%%
 #seed a ser utilizada para replicação
 seed = 6439
+# k-fold estratificado, preserva a proposcao de positivos e negativos
+kf = StratifiedKFold(n_splits=10)
+# controla a quantidade de iteracoes de otimizacao q sera feita pelo Hyperopt
+n_iter = 10
 
+#%% 
 # feature_names e X_data, y_data  dependem da base q sera utilizada
 # geramos varias bases com features diferentes, com apenas 1 orgao (22000), etc
 # balanceado vs desbalanceado
@@ -125,7 +130,7 @@ for train_index, val_index in kf.split(X_train_cv, y_train_cv):
     clf_pred_proba = clf.predict_proba(X_val)
     clf_pred = clf.predict(X_val)
 
-    acc, prec, rec, spec, f_m = CalculaScores(y_val, clf_pred)
+    acc, prec, rec, spec, f_m = calcula_scores(y_val, clf_pred)
     
     auc.append(roc_auc_score(y_val, clf_pred_proba[:,1]))
     accuracy.append(acc)
@@ -145,7 +150,7 @@ print("XGBoost F-Measure: \n\tMédia: {:.3f}\n\tDesvio: {:.3f}".format(statistic
 clf_pred_test = clf.predict(X_test)
 clf_pred_proba_test = clf.predict_proba(X_test)
 
-acc, prec, rec, spec, f_m = CalculaScores(y_test, clf_pred_test)
+acc, prec, rec, spec, f_m = calcula_scores(y_test, clf_pred_test)
 
 print("XGBoost AUC: {:.3f}".format(roc_auc_score(y_test, clf_pred_proba_test[:,1])))
 print("XGBoost Accuracy: {:.3f}".format(acc))
@@ -178,7 +183,7 @@ gs_results_df.plot(subplots=True,figsize=(10, 10))
 
 #%%
 ####################   RANDOM SEARCH   ################
-n_iter=20
+
 param_grid_rand={'learning_rate': np.logspace(-3, 0, 10),
                  'max_depth':  randint(2,14),
                  'n_estimators': randint(50,250),
@@ -278,7 +283,7 @@ model.fit(X_train_cv, y_train_cv)
 clf_pred_test = model.predict(X_test)
 clf_pred_proba_test = model.predict_proba(X_test)
 
-acc, prec, rec, spec, f_m = CalculaScores(y_test, clf_pred_test)
+acc, prec, rec, spec, f_m = calcula_scores(y_test, clf_pred_test)
 auc = roc_auc_score(y_test, clf_pred_proba_test[:,1])
 
 print("XGBoost AUC: {:.3f}".format(auc))
@@ -294,12 +299,83 @@ hyperopt_results=np.array([[-x['result']['loss'],
                       x['misc']['vals']['learning_rate'][0],
                       x['misc']['vals']['max_depth'][0],
                       x['misc']['vals']['min_child_weight'][0],
-                      x['misc']['vals']['n_estimators'][0]] for x in trials.trials])
+                      x['misc']['vals']['n_estimators'][0],
+                      x['misc']['vals']['colsample_bytree'][0],
+                      x['misc']['vals']['subsample'][0],
+                      x['misc']['vals']['gamma'][0],
+                      x['misc']['vals']['alpha'][0],
+                      x['misc']['vals']['lambda'][0]] for x in trials.trials])
 
 hyperopt_results_df=pd.DataFrame(hyperopt_results,
-                           columns=['score', 'learning_rate', 'max_depth', 'min_child_weight', 'n_estimators'])
-hyperopt_results_df.plot(subplots=True,figsize=(10, 10))
+                           columns=['score', 'learning_rate', 'max_depth', 'min_child_weight',
+                            'n_estimators', 'colsample_bytree', 'subsample', 'gamma', 'alpha','lambda'])
+#hyperopt_results_df.plot(subplots=True,figsize=(10, 10))
 
 # %%
 plot_roc_curve(model, X_test, y_test)
 plot_precision_recall_curve(model, X_test, y_test)
+#%%
+fig, ax1 = plt.subplots(figsize=(10, 5))
+# ['score', 'learning_rate', 'max_depth', 'min_child_weight',
+# 'n_estimators', 'colsample_bytree', 'subsample', 'gamma', 'alpha','lamda']
+# {'tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple', 'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan'}
+color = 'tab:blue'
+ax1.set_xlabel('Rodadas de Otimização')
+ax1.set_ylabel('Espaço de Busca', color=color)
+line1 = ax1.plot(hyperopt_results_df['score'], color=color, label='Score')
+ax1.tick_params(axis='y', labelcolor=color)
+
+color = 'tab:orange'
+ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
+ax2.set_ylabel('Espaço de Busca', color=color)  # we already handled the x-label with ax1
+line2 = ax2.plot(hyperopt_results_df['learning_rate'], color=color, label='Learning Rate')
+ax2.tick_params(axis='y', labelcolor=color)
+
+color = 'tab:green'
+ax3 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
+line3 = ax3.plot(hyperopt_results_df['max_depth'], color=color, label='Max Depth')
+ax3.set_yticks([])
+
+color = 'tab:red'
+ax4 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
+line4 = ax4.plot(hyperopt_results_df['min_child_weight'], color=color, label='Min Child Weight')
+ax4.set_yticks([])
+
+color = 'tab:purple'
+ax5 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
+line5 = ax5.plot(hyperopt_results_df['n_estimators'], color=color, label='#Estimators')
+ax5.set_yticks([])
+
+color = 'tab:brown'
+ax6 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
+line6 = ax6.plot(hyperopt_results_df['colsample_bytree'], color=color, label='ColSample/Tree')
+ax6.set_yticks([])
+
+color = 'tab:pink'
+ax7 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
+line7 = ax7.plot(hyperopt_results_df['subsample'], color=color, label='Subsample')
+ax7.set_yticks([])
+
+color = 'tab:gray'
+ax8 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
+line8 = ax8.plot(hyperopt_results_df['gamma'], color=color, label='Gamma')
+ax8.set_yticks([])
+
+color = 'tab:olive'
+ax9 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
+line9 = ax9.plot(hyperopt_results_df['alpha'], color=color, label='Alpha')
+ax9.set_yticks([])
+
+color = 'tab:cyan'
+ax10 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
+line10 = ax10.plot(hyperopt_results_df['lambda'], color=color, label='Lambda')
+ax10.set_yticks([])
+
+lines = line1+line2+line3+line4+line5+line6+line7+line8+line9+line10
+labs = [l.get_label() for l in lines]
+ax1.legend(lines, labs, loc=0)
+
+fig.tight_layout()  # otherwise the right y-label is slightly clipped
+plt.show()
+
+# %%

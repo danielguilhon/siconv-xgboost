@@ -73,7 +73,7 @@ seed = 6439
 # k-fold estratificado, preserva a proposcao de positivos e negativos
 kf = StratifiedKFold(n_splits=10)
 # controla a quantidade de iteracoes de otimizacao q sera feita pelo Hyperopt
-n_iter = 5
+n_iter = 20
 
 # %%
 #le os dados em formato onehot
@@ -132,11 +132,15 @@ print("############  RESULTADOS DO TESTE SEM OTIMIZACAO  #################")
 # %%
 # otimizacao de hiperparametros
 # espaco de busca de hiperparametros
+# hp.choice retorna o indice da lista passada
+mlp_activation = ['relu', 'logistic', 'tanh']
+mlp_solver = ['sgd', 'adam']
+
 mlp_space = {
     'hidden_layer_sizes': hp.uniformint('hidden_layer_sizes', 10, 100),
     'alpha': hp.loguniform('alpha', -8*np.log(10), 3*np.log(10)),
-    'activation': hp.choice('activation', ['relu', 'logistic', 'tanh']),
-    'solver': hp.choice('solver', ['sgd', 'adam'])
+    'activation': hp.choice('activation', mlp_activation),
+    'solver': hp.choice('solver', mlp_solver)
     # 'learning_rate_init': 0.001, 
     #             power_t=0.5,
     #             max_iter=200, 
@@ -171,10 +175,10 @@ mlp_best = fmin(fn=mlp_obj, # function to optimize
 # %%
 #melhores parâmetros encontrados
 best_params = { 
-            'hidden_layer_sizes': mlp_best['hidden_layer_sizes'],
+            'hidden_layer_sizes': int(mlp_best['hidden_layer_sizes']),
             'alpha': mlp_best['alpha'],
-            'activation': mlp_best['activation'],
-            'solver': mlp_best['solver']
+            'activation': mlp_activation[mlp_best['activation']],
+            'solver': mlp_solver[mlp_best['solver']]
             }
 model = MLPClassifier(**best_params,
                         random_state=seed,
@@ -189,12 +193,12 @@ acc, prec, rec, spec, f_m = calcula_scores(y_test, clf_pred_test)
 auc = roc_auc_score(y_test, clf_pred_proba_test[:,1])
 
 print("############  RESULTADOS DO TESTE APÓS OTIMIZACAO  #################")
-print("Logit AUC: {:.3f}".format(roc_auc_score(y_test, clf_pred_proba_test[:,1])))
-print("Logit Accuracy: {:.3f}".format(acc))
-print("Logit Precision: {:.3f}".format(prec))
-print("Logit Recall: {:.3f}".format(rec))
-print("Logit Specificity: {:.3f}".format(spec))
-print("Logit F-Measure: {:.3f}".format(f_m))
+print("MLP AUC: {:.3f}".format(roc_auc_score(y_test, clf_pred_proba_test[:,1])))
+print("MLP Accuracy: {:.3f}".format(acc))
+print("MLP Precision: {:.3f}".format(prec))
+print("MLP Recall: {:.3f}".format(rec))
+print("MLP Specificity: {:.3f}".format(spec))
+print("MLP F-Measure: {:.3f}".format(f_m))
 
 #%% 
 fpr, tpr, roc_thresh = roc_curve(y_test, clf_pred_proba_test[:,1])
@@ -227,3 +231,11 @@ plt.legend(lines, labels, loc=(0, -.38), prop=dict(size=14))
 
 
 plt.show()
+
+# %%
+pickle.dump(y_test, open('mlp_y_test_onehot_all.pkl', 'wb'), pickle.HIGHEST_PROTOCOL)
+pickle.dump(best_params, open('mlp_best_params_onehot_all.pkl', 'wb'), pickle.HIGHEST_PROTOCOL)
+pickle.dump(clf_pred_proba_test, open('mlp_clf_pred_proba_test_onehot_all.pkl', 'wb'), pickle.HIGHEST_PROTOCOL)
+pickle.dump(clf_pred_test, open('mlp_clf_pred_test_onehot_all.pkl', 'wb'), pickle.HIGHEST_PROTOCOL)
+
+# %%
