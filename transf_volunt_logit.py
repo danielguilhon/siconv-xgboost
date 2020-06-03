@@ -92,6 +92,9 @@ X_data = scaler.fit_transform(X_data)
 #stratify mantem a proporcao entre classes pos/neg
 X_train_cv, X_test, y_train_cv, y_test = train_test_split(X_data, y_data, test_size=0.1, random_state=seed, stratify=y_data)
 
+pickle.dump(X_test, open('x_test_desbalanc_onehot_all.data','wb'))
+pickle.dump(y_test, open('y_test_desbalanc_onehot_all.data','wb'))
+
 # %%
 # fazemos um teste inicial com o modelo em configuracao padrao
 clf_logit = LogisticRegression(
@@ -103,20 +106,22 @@ clf_logit = LogisticRegression(
 #score = cross_validate(clf_logit, X_train_cv, y_train_cv, cv=kf, scoring=['roc_auc','precision','recall'], n_jobs=-1)
 clf_logit.fit(X_train_cv, y_train_cv)
 
-# apops o treino, realizamos previsoes com os dados de teste
+# pickle.dump(clf_logit, open('clf_logit_default_onehot_all.model','wb'))
+
+# apos o treino, realizamos previsoes com os dados de teste
 clf_pred_test = clf_logit.predict(X_test)
 clf_pred_proba_test = clf_logit.predict_proba(X_test)
 
 acc, prec, rec, spec, f_m = calcula_scores(y_test, clf_pred_test)
 
-print("############ RESULTADOS DO TESTE MODELO PADRÃO #################")
+print("############ RESULTADOS DO TESTE LOGIT MODELO PADRÃO #################")
 print("Logit AUC: {:.3f}".format(roc_auc_score(y_test, clf_pred_proba_test[:,1])))
 print("Logit Accuracy: {:.3f}".format(acc))
 print("Logit Precision: {:.3f}".format(prec))
 print("Logit Recall: {:.3f}".format(rec))
 print("Logit Specificity: {:.3f}".format(spec))
 print("Logit F-Measure: {:.3f}".format(f_m))
-print("############ RESULTADOS DO TESTE MODELO PADRÃO #################")
+print("############ RESULTADOS DO TESTE LOGIT MODELO PADRÃO #################")
 # %%
 # espaco de busca de hiperparametros
 logit_fit = [False, True]
