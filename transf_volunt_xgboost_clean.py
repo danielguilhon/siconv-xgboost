@@ -119,32 +119,32 @@ recall = []
 f_measure = []
 auc = []
 
-# kf = StratifiedKFold(n_splits=10)
-##%%timeit -n1 -r1
-# for train_index, val_index in kf.split(X_train_cv, y_train_cv):
-#     X_train, X_val = X_train_cv[train_index], X_train_cv[val_index]
-#     y_train, y_val = y_train_cv[train_index], y_train_cv[val_index]
+kf = StratifiedKFold(n_splits=10)
+#%% ## timeit -n1 -r1
+for train_index, val_index in kf.split(X_train_cv, y_train_cv):
+    X_train, X_val = X_train_cv[train_index], X_train_cv[val_index]
+    y_train, y_val = y_train_cv[train_index], y_train_cv[val_index]
     
-#     clf.fit(X_train, y_train, eval_metric='auc')
+    clf.fit(X_train, y_train, eval_metric='auc')
 
-#     clf_pred_proba = clf.predict_proba(X_val)
-#     clf_pred = clf.predict(X_val)
+    clf_pred_proba = clf.predict_proba(X_val)
+    clf_pred = clf.predict(X_val)
 
-#     acc, prec, rec, spec, f_m = calcula_scores(y_val, clf_pred)
+    acc, prec, rec, spec, f_m = calcula_scores(y_val, clf_pred)
     
-#     auc.append(roc_auc_score(y_val, clf_pred_proba[:,1]))
-#     accuracy.append(acc)
-#     precision.append(prec)
-#     specificity.append(spec)
-#     recall.append(rec)
-#     f_measure.append(f_m)
+    auc.append(roc_auc_score(y_val, clf_pred_proba[:,1]))
+    accuracy.append(acc)
+    precision.append(prec)
+    specificity.append(spec)
+    recall.append(rec)
+    f_measure.append(f_m)
 
-# print("XGBoost AUC: \n\tMédia: {:.3f}\n\tDesvio: {:.3f}".format(statistics.mean(auc), statistics.stdev(auc)))
-# print("XGBoost Accuracy: \n\tMédia: {:.3f}\n\tDesvio: {:.3f}".format(statistics.mean(accuracy), statistics.stdev(accuracy)))
-# print("XGBoost Precision: \n\tMédia: {:.3f}\n\tDesvio: {:.3f}".format(statistics.mean(precision), statistics.stdev(precision)))
-# print("XGBoost Recall: \n\tMédia: {:.3f}\n\tDesvio: {:.3f}".format(statistics.mean(recall), statistics.stdev(recall)))
-# print("XGBoost Specificity: \n\tMédia: {:.3f}\n\tDesvio: {:.3f}".format(statistics.mean(specificity), statistics.stdev(specificity)))
-# print("XGBoost F-Measure: \n\tMédia: {:.3f}\n\tDesvio: {:.3f}".format(statistics.mean(f_measure), statistics.stdev(f_measure)))
+print("XGBoost AUC: \n\tMédia: {:.3f}\n\tDesvio: {:.3f}".format(statistics.mean(auc), statistics.stdev(auc)))
+print("XGBoost Accuracy: \n\tMédia: {:.3f}\n\tDesvio: {:.3f}".format(statistics.mean(accuracy), statistics.stdev(accuracy)))
+print("XGBoost Precision: \n\tMédia: {:.3f}\n\tDesvio: {:.3f}".format(statistics.mean(precision), statistics.stdev(precision)))
+print("XGBoost Recall: \n\tMédia: {:.3f}\n\tDesvio: {:.3f}".format(statistics.mean(recall), statistics.stdev(recall)))
+print("XGBoost Specificity: \n\tMédia: {:.3f}\n\tDesvio: {:.3f}".format(statistics.mean(specificity), statistics.stdev(specificity)))
+print("XGBoost F-Measure: \n\tMédia: {:.3f}\n\tDesvio: {:.3f}".format(statistics.mean(f_measure), statistics.stdev(f_measure)))
 
 clf.fit(X_train_cv, y_train_cv, eval_metric='auc')
 

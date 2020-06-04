@@ -168,3 +168,4 @@ def Dados_Balanceados_SMOTE_NearMiss_Sem_Municipio_Orgao():
     nm = NearMiss(sampling_strategy=0.5)
     X_res_new, y_res_new = nm.fit_resample(X_res, y_res)
     dump_svmlight_file(X_res_new, y_res_new, 'smote_nearmiss_1_1_onehot_sem_municipio_orgao.svm') 
+
