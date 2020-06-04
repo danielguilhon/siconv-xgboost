@@ -17,9 +17,10 @@ import pandas as pd
 from scipy.stats import randint
 from numpy.random import RandomState
 from functools import partial
+from warnings import filterwarnings
 
 import matplotlib.pyplot as plt
-from matplotlib.pyplot import cm
+from matplotlib import cm
 from matplotlib import rcParams
 
 from xgboost import XGBClassifier
@@ -40,7 +41,6 @@ from sklearn.model_selection import cross_validate
 
 from sklearn.datasets import dump_svmlight_file
 from sklearn.datasets import load_svmlight_file
-from sklearn.datasets import load_svmlight_files
 
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import accuracy_score
@@ -53,28 +53,13 @@ from sklearn.metrics import plot_precision_recall_curve
 from sklearn.metrics import plot_roc_curve
 from sklearn.metrics import classification_report
 
+from sklearn.exceptions import ConvergenceWarning
+
 from hyperopt import fmin, tpe, hp, anneal, Trials
 
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% FUNCOES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-# salva objetos com pickle
-def save_obj(obj, name ):
-    with open(name + '.pkl', 'wb') as f:
-        pickle.dump(obj, f, pickle.HIGHEST_PROTOCOL)
+import transf_volunt_features as tv
 
-## carrega objetos que foram salvos com pickle
-def load_obj(name):
-    with open(name + '.pkl', 'rb') as f:
-        return pickle.load(f)
-
-def calcula_scores(y_true, model_prediction):
-    tn, fp, fn, tp = confusion_matrix(y_true, model_prediction).ravel()
-    specificity = tn / (tn+fp)
-    accuracy =  (tp+tn) / (tp+tn+fp+fn)
-    precision =  tp / (tp+fp)
-    recall =  tp / (tp+fn)
-    f_measure = 2*precision*recall/(precision+recall)
-
-    return accuracy, precision, recall, specificity, f_measure
+filterwarnings(action='ignore', category=ConvergenceWarning)
 
 ### XGBOOST
 ## funcao a ser minimizada - retorna valor negativo pois trata-se do recall
@@ -166,7 +151,14 @@ seed = 6439
 # k-fold estratificado, preserva a proposcao de positivos e negativos
 kf = StratifiedKFold(n_splits=10)
 # controla a quantidade de iteracoes de otimizacao q sera feita pelo Hyperopt
-n_iter = 20
+n_iter = 2
+
+desbalanceado = ['onehot_all', 'onehot_sem_municipio', 'onehot_sem_municipio_orgao']
+
+balanceado = ['smote_10_1', 'smote_5_1', 'smote_1_1',
+ 'nearmiss_10_1', 'nearmiss_5_1', 'nearmiss_1_1'
+ 'smote_nearmiss_10_1', 'smote_nearmiss_5_1', 'smote_nearmiss_1_1']
+
 
 ##################################################################################
 
@@ -176,16 +168,11 @@ n_iter = 20
 # balanceado vs desbalanceado
 # categoricos one_hot, features normalizadas, 
 # outras mais para igualar a comparação dos testes. 
-
-desbalanceado = ['onehot_all', 'onehot_sem_municipio', 'onehot_sem_municipio_orgao']
-balanceado = ['smote_10_1', 'smote_5_1', 'smote_1_1',
- 'nearmiss_10_1', 'nearmiss_5_1', 'nearmiss_1_1'
- 'smote_nearmiss_10_1', 'smote_nearmiss_5_1', 'smote_nearmiss_1_1']
-
-# loop para ler os dados em formato onehot
-
+############ DADOS DESBALANCEADOS #########################################################
+############ loop para ler os dados em formato onehot #####################################
 for rodada in desbalanceado:
-    feature_names = load_obj('feature_names_' + rodada)
+    print("RODADA INICIADA - {}".format(rodada))
+    feature_names = tv.Load_Obj('feature_names_' + rodada)
     X_data, y_data = load_svmlight_file('desbalanceado_' + rodada + '.svm', n_features = len(feature_names))# pylint: disable=unbalanced-tuple-unpacking
 
     # executa a normalizacao dos dados
@@ -196,11 +183,11 @@ for rodada in desbalanceado:
     #stratify mantem a proporcao entre classes pos/neg
     X_train_cv, X_test, y_train_cv, y_test = train_test_split(X_data, y_data, test_size=0.1, random_state=seed, stratify=y_data)
 
-    save_obj(X_test, 'X_test_'+rodada)
-    save_obj(X_test, 'y_test_'+rodada)
+    tv.Save_Obj(X_test, 'X_test_'+rodada)
+    tv.Save_Obj(X_test, 'y_test_'+rodada)
+    
     #%% main loop 
-
-    ## CLASSIFICACAO INICIAL COM PARAMETROS PADRAO
+################### CLASSIFICACAO INICIAL COM PARAMETROS PADRAO
 
     clf_xgb = XGBClassifier( #default parameters
                     learning_rate=0.3,
@@ -214,14 +201,15 @@ for rodada in desbalanceado:
                     objective = 'binary:logistic',
                     eval_metric= 'aucpr',
                     n_estimators=150,
-                    nthread=4,
+                    n_jobs=-1,
                     seed=seed
     )
 
     clf_log = LogisticRegression(
                     random_state=seed,
                     solver='saga', 
-                    class_weight = 'balanced'
+                    class_weight = 'balanced',
+                    n_jobs=-1
                     )
 
     clf_mlp = MLPClassifier(
@@ -233,7 +221,8 @@ for rodada in desbalanceado:
                     batch_size='auto', 
                     learning_rate="constant", 
                     learning_rate_init=0.001, 
-                    power_t=0.5, max_iter=200, 
+                    power_t=0.5, 
+                    max_iter=200, 
                     shuffle=True, 
                     tol=1e-4, 
                     momentum=0.9, 
@@ -248,53 +237,13 @@ for rodada in desbalanceado:
 
     classificadores = [clf_xgb, clf_log, clf_mlp]
 
-    ## esse codigo eh mais simples, porem temos menos controle sobre as metricas
-    # score = cross_val_score(clf, X_train_cv, y_train_cv, cv=kf, scoring='roc_auc', n_jobs=-1)
-    # print('XGBoost AUC: %r' % (score.mean()))
-    # nesse as metricas sao mais flexiveis, mas ainda pre-definidas
-    # score = cross_validate(clf, X_train_cv, y_train_cv, cv=kf, scoring=['roc_auc','precision','recall'], n_jobs=-1)
-    # print('XGBoost AUC: %r' % (score['test_roc_auc'].mean()))
-
-    # accuracy = []
-    # precision = []
-    # specificity = []
-    # recall = []
-    # f_measure = []
-    # auc = []
-
-    # kf = StratifiedKFold(n_splits=10)
-    ##%%timeit -n1 -r1
-    # for train_index, val_index in kf.split(X_train_cv, y_train_cv):
-    #     X_train, X_val = X_train_cv[train_index], X_train_cv[val_index]
-    #     y_train, y_val = y_train_cv[train_index], y_train_cv[val_index]
-        
-    #     clf.fit(X_train, y_train, eval_metric='auc')
-
-    #     clf_pred_proba = clf.predict_proba(X_val)
-    #     clf_pred = clf.predict(X_val)
-
-    #     acc, prec, rec, spec, f_m = calcula_scores(y_val, clf_pred)
-        
-    #     auc.append(roc_auc_score(y_val, clf_pred_proba[:,1]))
-    #     accuracy.append(acc)
-    #     precision.append(prec)
-    #     specificity.append(spec)
-    #     recall.append(rec)
-    #     f_measure.append(f_m)
-
-    # print("XGBoost AUC: \n\tMédia: {:.3f}\n\tDesvio: {:.3f}".format(statistics.mean(auc), statistics.stdev(auc)))
-    # print("XGBoost Accuracy: \n\tMédia: {:.3f}\n\tDesvio: {:.3f}".format(statistics.mean(accuracy), statistics.stdev(accuracy)))
-    # print("XGBoost Precision: \n\tMédia: {:.3f}\n\tDesvio: {:.3f}".format(statistics.mean(precision), statistics.stdev(precision)))
-    # print("XGBoost Recall: \n\tMédia: {:.3f}\n\tDesvio: {:.3f}".format(statistics.mean(recall), statistics.stdev(recall)))
-    # print("XGBoost Specificity: \n\tMédia: {:.3f}\n\tDesvio: {:.3f}".format(statistics.mean(specificity), statistics.stdev(specificity)))
-    # print("XGBoost F-Measure: \n\tMédia: {:.3f}\n\tDesvio: {:.3f}".format(statistics.mean(f_measure), statistics.stdev(f_measure)))
-
     previsoes = {}
     for clf in classificadores:
+        print("FIT Desbalanceado: {}".format(type(clf).__name__))
         clf.fit(X_train_cv, y_train_cv)
         clf_pred_test = clf.predict(X_test)
         clf_pred_proba_test = clf.predict_proba(X_test)
-        acc, prec, rec, spec, f_m = calcula_scores(y_test, clf_pred_test)
+        acc, prec, rec, spec, f_m = tv.calcula_scores(y_test, clf_pred_test)
         auc = roc_auc_score(y_test, clf_pred_proba_test[:,1])
         previsoes[type(clf).__name__] = {'ACU': "{:.3f}".format(acc),
                                         'SEN':"{:.3f}".format(rec),
@@ -303,25 +252,19 @@ for rodada in desbalanceado:
                                         'F-measure':"{:.3f}".format(f_m),
                                         'AUC': "{:.3f}".format(auc)
                                     }
+############## GERA TABELA COM RESULTADOS DESBALANCEADOS #######################################
+
     previsoes_df = pd.DataFrame(previsoes)
     with open("table_result_1_desbalanc"+rodada+".tex", "w") as f:
         f.write("\\begin{table}[H]\n\\label{table:result:1:desbalanc}\n\\centering\n\\caption{Resumo das métricas para dados desbalanceados sem otimização de hiperparâmetros}\n")
         f.write(previsoes_df.transpose().to_latex())
         f.write("\\end{table}")
+    print("Table Latex table_result_1_desbalanc_{}.tex Gerada".format(rodada))
 
-#%%%%%%%%%%%%%%%%%% TEST %%%%%%%%%%%%%%%%%%%%%%%%
-    
-    total = 10
-    rcParams.update({'figure.autolayout': True})
-    fig = plt.figure(figsize=(10,5))
-    #plot importances do xgb
-    importances = pd.Series(classificadores[0].feature_importances_, feature_names)
-    features_sorted = importances.sort_values()
-    total_features = features_sorted[-total:]
-    total_features.plot.barh(color = iter(cm.rainbow(np.linspace(0,1,total))))
-    fig.savefig(rodada+'.png')
+############ GERA FIGURA COM FEATURE IMPORTANCE ###################################################
+    tv.Gera_Figura_Feature_Importance(classificadores[0], rodada, feature_names)
 
-    #%%%%%%%%%%%%%%%%%% OTIMIZAÇÃO %%%%%%%%%%%%%%%%%%
+############ OTIMIZAÇÃO #########################################################################
     # sum(negative instances) / sum(positive instances)
     # scale_pos_weight eh a proporcao neg/ pos
     # vamos utilizar 20, 10, 5, 1
@@ -344,17 +287,22 @@ for rodada in desbalanceado:
             func_obj = partial(xgb_cv, random_state=seed, cv=kf, X=X_train_cv, y=y_train_cv)
 
         if type(clf).__name__ == 'LogisticRegression':
+            logit_fit = [False, True]
+            logit_penalty = ['elasticnet']#['l1','l2'] #elasticnet e mais flexivel, com l1_ratio 0, vira L2, em 1, vira L1
             space = {
                 'C': hp.loguniform('C', low=-4*np.log(10), high=4*np.log(10)), #
                 'intercept_scaling': hp.loguniform('intercept_scaling', -8*np.log(10), 8*np.log(10)),
-                'fit_intercept': hp.choice('fit_intercept', [False, True]),
-                'penalty': hp.choice('penalty', ['l1', 'l2']), # normalizacao L1 ou L2 utilizada
+                'fit_intercept': hp.choice('fit_intercept', logit_fit),
+                'penalty': hp.choice('penalty', logit_penalty), # normalizacao L1 ou L2 utilizada
                 'l1_ratio': hp.uniform('l1_ratio', 0, 1) # taxa de normalizacao 0 < l1_ratio <1, combinacao L1/L2.
             }
             func_obj = partial(log_cv, random_state=seed, cv=kf, X=X_train_cv, y=y_train_cv)
         
         if type(clf).__name__ == 'MLPClassifier':
+            mlp_activation = ['relu', 'logistic', 'tanh']
+            mlp_solver = ['sgd', 'adam']
             space = {
+                'learning_rate': hp.loguniform('learning_rate', -6.9, 0.0),
                 'hidden_layer_sizes': hp.uniformint('hidden_layer_sizes', 10, 100),
                 'alpha': hp.loguniform('alpha', -8*np.log(10), 3*np.log(10)),
                 'activation': hp.choice('activation', mlp_activation),
@@ -406,8 +354,7 @@ for rodada in desbalanceado:
                       x['misc']['vals']['lambda'][0]] for x in trials.trials])
 
         if type(clf).__name__ == 'LogisticRegression':
-            logit_fit = [False, True]
-            logit_penalty = ['l1','l2']
+            
             best_params = { 
                 'C': best['C'], 
                 'penalty': logit_penalty[best['penalty']],
@@ -423,8 +370,7 @@ for rodada in desbalanceado:
                                 )
 
         if type(clf).__name__ == 'MLPClassifier':
-            mlp_activation = ['relu', 'logistic', 'tanh']
-            mlp_solver = ['sgd', 'adam']
+
             best_params = { 
                 'hidden_layer_sizes': int(best['hidden_layer_sizes']),
                 'alpha': best['alpha'],
@@ -436,10 +382,15 @@ for rodada in desbalanceado:
                     )
 
         model.fit(X_train_cv, y_train_cv)
-        save_obj(model, 'model_'+type(clf).__name__+'_'+rodada+'_otimizado')
+        
+        if type(clf).__name__ == 'XGBClassifier':
+            tv.Gera_Figura_Feature_Importance(model, rodada, feature_names)
+
+        tv.Save_Obj(model, 'model_'+type(clf).__name__+'_'+rodada+'_otimizado')
+
         clf_pred_test = model.predict(X_test)
         clf_pred_proba_test = model.predict_proba(X_test)
-        acc, prec, rec, spec, f_m = calcula_scores(y_test, clf_pred_test)
+        acc, prec, rec, spec, f_m = tv.calcula_scores(y_test, clf_pred_test)
         auc = roc_auc_score(y_test, clf_pred_proba_test[:,1])
         previsoes[type(clf).__name__] = {'ACU': "{:.3f}".format(acc),
                                         'SEN':"{:.3f}".format(rec),
@@ -455,74 +406,10 @@ for rodada in desbalanceado:
         f.write(previsoes_df.transpose().to_latex())
         f.write("\\end{table}")
     
+
     # %%
     # plotting the results of optimization
-    hyperopt_results_df=pd.DataFrame(hyperopt_results,
-                            columns=['score', 'learning_rate', 'max_depth', 'min_child_weight',
-                                'n_estimators', 'colsample_bytree', 'subsample', 'gamma', 'alpha','lambda'])
-
-#%%
-    rcParams.update({'figure.autolayout': True})
-    fig, ax1 = plt.subplots(figsize=(10, 5))
-
-    color = 'tab:blue'
-    ax1.set_xlabel('Rodadas de Otimização')
-    ax1.set_ylabel('Espaço de Busca', color=color)
-    line1 = ax1.plot(hyperopt_results_df['score'], color=color, label='Score')
-    ax1.tick_params(axis='y', labelcolor=color)
-
-    color = 'tab:orange'
-    ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
-    ax2.set_ylabel('Espaço de Busca', color=color)  # we already handled the x-label with ax1
-    line2 = ax2.plot(hyperopt_results_df['learning_rate'], color=color, label='Learning Rate')
-    ax2.tick_params(axis='y', labelcolor=color)
-
-    color = 'tab:green'
-    ax3 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
-    line3 = ax3.plot(hyperopt_results_df['max_depth'], color=color, label='Max Depth')
-    ax3.set_yticks([])
-
-    color = 'tab:red'
-    ax4 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
-    line4 = ax4.plot(hyperopt_results_df['min_child_weight'], color=color, label='Min Child Weight')
-    ax4.set_yticks([])
-
-    color = 'tab:purple'
-    ax5 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
-    line5 = ax5.plot(hyperopt_results_df['n_estimators'], color=color, label='#Estimators')
-    ax5.set_yticks([])
-
-    color = 'tab:brown'
-    ax6 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
-    line6 = ax6.plot(hyperopt_results_df['colsample_bytree'], color=color, label='ColSample/Tree')
-    ax6.set_yticks([])
-
-    color = 'tab:pink'
-    ax7 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
-    line7 = ax7.plot(hyperopt_results_df['subsample'], color=color, label='Subsample')
-    ax7.set_yticks([])
-
-    color = 'tab:gray'
-    ax8 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
-    line8 = ax8.plot(hyperopt_results_df['gamma'], color=color, label='Gamma')
-    ax8.set_yticks([])
-
-    color = 'tab:olive'
-    ax9 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
-    line9 = ax9.plot(hyperopt_results_df['alpha'], color=color, label='Alpha')
-    ax9.set_yticks([])
-
-    color = 'tab:cyan'
-    ax10 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
-    line10 = ax10.plot(hyperopt_results_df['lambda'], color=color, label='Lambda')
-    ax10.set_yticks([])
-
-    lines = line1+line2+line3+line4+line5+line6+line7+line8+line9+line10
-    labs = [l.get_label() for l in lines]
-    ax1.legend(lines, labs, loc=0)
-
-    fig.savefig('hiperparametros_'+rodada+'.png')
-    
+    tv.Gera_Figura_Hiperopt_Otimizacao(hyperopt_results, rodada)  
 
 # %%
 # plot_roc_curve(model, X_test, y_test)

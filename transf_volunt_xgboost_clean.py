@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import randint
 from numpy.random import RandomState
+import matplotlib.pyplot as plt
 
 import xgboost as xgb
 from xgboost import XGBClassifier
