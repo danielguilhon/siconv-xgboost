@@ -49,24 +49,7 @@ def calcula_scores(y_true, model_prediction):
 
     return accuracy, precision, recall, specificity, f_measure
 
-#%%
-'''
-separa aleatoriamente 10% dos dados para ficar pra teste, o que não será impactado pelos
-metodos de sampling pois nao serao separados depois.
-'''
-def Dados_Balanceados_Separa_Teste_Onehot_Sem_Municipio_Orgao():
-    feature_names = Load_Obj('feature_names_onehot_sem_municipio_orgao')
-    X_data, y_data = load_svmlight_file('desbalanceado_onehot_sem_municipio_orgao.svm', n_features = len(feature_names))# pylint: disable=unbalanced-tuple-unpacking
-    
-    scaler = StandardScaler(with_mean=False)
-    X_data = scaler.fit_transform(X_data)
-
-    X_train_cv, X_test, y_train_cv, y_test = train_test_split(X_data, y_data, test_size=0.1, random_state=6439, stratify=y_data)
-    Save_Obj(scaler, 'scaler_balanceado')
-    dump_svmlight_file(X_train_cv, y_train_cv, 'treino_desbalanceado_onehot_sem_municipio_orgao.svm')
-    dump_svmlight_file(X_test, y_test, 'test_desbalanceado_onehot_sem_municipio_orgao.svm')
-
-#%%
+#%%####################################################################
 '''
 cria arquivos svm com features categoricas (sem one hot e sem scaling)
 desbalanceadas, já dando um dump nos arquivos.
@@ -95,7 +78,7 @@ def Dados_Desbalanceados_Onehot_All():
     Save_Obj(feature_names, 'feature_names_onehot_all')
     dump_svmlight_file(X_data.values, data_full.TARGET.values, 'desbalanceado_onehot_all.svm')    
 
-#%%
+#%%####################################################################
 def Dados_Desbalanceados_Categoricos_All():
     engine = create_engine("mysql+pymysql://root:Siconv!@localhost/siconv", pool_pre_ping=True,  connect_args = {'use_unicode':True, 'charset':'utf8mb4'})
     tbl_features_df = pd.read_sql_table('features',engine)
@@ -116,7 +99,7 @@ def Dados_Desbalanceados_Categoricos_All():
     Save_Obj(feature_names, 'feature_names_categoricos_all')
     dump_svmlight_file(X_data.values, data_full.TARGET.values, 'desbalanceado_categoricos_all.svm')    
     
-#%%
+#%%####################################################################
 def Dados_Desbalanceados_Onehot_Sem_Municipio():
     engine = create_engine("mysql+pymysql://root:Siconv!@localhost/siconv", pool_pre_ping=True,  connect_args = {'use_unicode':True, 'charset':'utf8mb4'})
     tbl_features_df = pd.read_sql_table('features',engine)
@@ -139,7 +122,7 @@ def Dados_Desbalanceados_Onehot_Sem_Municipio():
     Save_Obj(feature_names, 'feature_names_onehot_sem_municipio')
     dump_svmlight_file(X_data.values, data_full.TARGET.values, 'desbalanceado_onehot_sem_municipio.svm') 
 
-#%%
+#%%####################################################################
 def Dados_Desbalanceados_Onehot_Sem_Municipio_Orgao():
     engine = create_engine("mysql+pymysql://root:Siconv!@localhost/siconv", pool_pre_ping=True,  connect_args = {'use_unicode':True, 'charset':'utf8mb4'})
     tbl_features_df = pd.read_sql_table('features',engine)
@@ -163,10 +146,28 @@ def Dados_Desbalanceados_Onehot_Sem_Municipio_Orgao():
     Save_Obj(feature_names, 'feature_names_onehot_sem_municipio_orgao')
     dump_svmlight_file(X_data.values, data_full.TARGET.values, 'desbalanceado_onehot_sem_municipio_orgao.svm') 
 
-#%%
+#%%####################################################################
+'''
+separa aleatoriamente 10% dos dados para ficar pra teste, o que não será impactado pelos
+metodos de sampling pois nao serao separados depois.
+'''
+def Dados_Balanceados_Separa_Teste_Onehot_Sem_Municipio_Orgao():
+    feature_names = Load_Obj('feature_names_onehot_sem_municipio_orgao')
+    X_data, y_data = load_svmlight_file('desbalanceado_onehot_sem_municipio_orgao.svm', n_features = len(feature_names))# pylint: disable=unbalanced-tuple-unpacking
+    
+    scaler = StandardScaler(with_mean=False)
+    X_data = scaler.fit_transform(X_data)
+
+    X_train_cv, X_test, y_train_cv, y_test = train_test_split(X_data, y_data, test_size=0.1, random_state=6439, stratify=y_data)
+    Save_Obj(scaler, 'scaler_balanceado')
+    dump_svmlight_file(X_train_cv, y_train_cv, 'treino_desbalanceado_onehot_sem_municipio_orgao.svm')
+    dump_svmlight_file(X_test, y_test, 'test_desbalanceado_onehot_sem_municipio_orgao.svm')
+
+#%%####################################################################
 '''
 já deve ter os arquivos anteriores com as features desbalanceadas para apenas
 carregar o arquivo e rebalancear sem conectar no banco
+primeiro deve ser executada a funcao de separar e chamar o scaler
 '''
 def Dados_Balanceados_SMOTE_Sem_Municipio_Orgao():
     #sampling_strategy = 0.1 ==> 10 x 1
@@ -188,7 +189,7 @@ def Dados_Balanceados_SMOTE_Sem_Municipio_Orgao():
     dump_svmlight_file(X_res, y_res, 'smote_1_1_onehot_sem_municipio_orgao.svm') 
 
 
-# %%
+#%%####################################################################
 def Dados_Balanceados_NearMiss_Sem_Municipio_Orgao():
     #sampling_strategy = 0.1 ==> 10 x 1
     #sampling_strategy = 0.2 ==> 5 x 1
@@ -209,7 +210,7 @@ def Dados_Balanceados_NearMiss_Sem_Municipio_Orgao():
     dump_svmlight_file(X_res, y_res, 'nearmiss_1_1_onehot_sem_municipio_orgao.svm') 
 
 
-# %%
+#%%####################################################################
 def Dados_Balanceados_SMOTE_NearMiss_Sem_Municipio_Orgao():
     #sampling_strategy = 0.1 ==> 10 x 1
     #sampling_strategy = 0.2 ==> 5 x 1
@@ -236,8 +237,7 @@ def Dados_Balanceados_SMOTE_NearMiss_Sem_Municipio_Orgao():
     X_res_new, y_res_new = nm.fit_resample(X_res, y_res)
     dump_svmlight_file(X_res_new, y_res_new, 'smote_nearmiss_1_1_onehot_sem_municipio_orgao.svm') 
 
-#%% #######################################################################
-
+#%%####################################################################
 def Gera_Figura_Feature_Importance(classificador, nome, feature_names):
     total = 10
     rcParams.update({'figure.autolayout': True})
@@ -253,7 +253,7 @@ def Gera_Figura_Feature_Importance(classificador, nome, feature_names):
     fig.savefig("feature_importance_{}.png".format(nome))
     print("Figura feature_importance_{}.png Gerada".format(nome))
 
-#%% ##############################################################################
+#%%####################################################################
 def Gera_Figura_Hiperopt_Otimizacao(hyperopt_results, nome):
     
     hyperopt_results_df=pd.DataFrame(hyperopt_results,

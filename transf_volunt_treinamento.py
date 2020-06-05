@@ -153,7 +153,7 @@ seed = 6439
 # k-fold estratificado, preserva a proposcao de positivos e negativos
 kf = StratifiedKFold(n_splits=10)
 # controla a quantidade de iteracoes de otimizacao q sera feita pelo Hyperopt
-n_iter = 2
+n_iter = 1
 
 desbalanceado = ['onehot_all', 'onehot_sem_municipio', 'onehot_sem_municipio_orgao']
 
@@ -404,15 +404,40 @@ for rodada in desbalanceado:
     # plotting the results of optimization
     tv.Gera_Figura_Hiperopt_Otimizacao(hyperopt_results, rodada)  
 
-for rodada in balanceado:
-    print("RODADA BALANCEADO INICIADA - {}".format(rodada))
-    feature_names = tv.Load_Obj('feature_names_' + rodada)
-    X_data, y_data = load_svmlight_file('desbalanceado_' + rodada + '.svm', n_features = len(feature_names))# pylint: disable=unbalanced-tuple-unpacking
+# ['smote_10_1', 'smote_5_1', 'smote_1_1',
+#  'nearmiss_10_1', 'nearmiss_5_1', 'nearmiss_1_1'
+#  'smote_nearmiss_10_1', 'smote_nearmiss_5_1', 'smote_nearmiss_1_1']
 
-    # executa a normalizacao dos dados
-    scaler = StandardScaler(with_mean=False)
-    X_data = scaler.fit_transform(X_data)
+#### o XGBClassifier está atomizado para 20 x 1 pos_neg_scale = 20
 
-    #faz o split entre treino/validacao e teste
-    #stratify mantem a proporcao entre classes pos/neg
-    X_train_cv, X_test, y_train_cv, y_test = train_test_split(X_data, y_data, test_size=0.1, random_state=seed, stratify=y_data)
+modelos = ['XGBClassifier', 'LogisticRegression', 'MLPClassifier']
+
+desbalanceado = ['onehot_sem_municipio_orgao']
+
+for i in desbalanceado:
+    for balanc in balanceado:
+        rodada = balanc+'_'+i
+        print("RODADA BALANCEADO INICIADA - {}".format(rodada))
+        feature_names = tv.Load_Obj('feature_names_' + i)
+        X_train_cv, y_train_cv = load_svmlight_file(rodada + '.svm', n_features = len(feature_names))# pylint: disable=unbalanced-tuple-unpacking
+        X_test, y_test = load_svmlight_file('test_desbalanceado_'+i+'.svm', n_features = len(feature_names))# pylint: disable=unbalanced-tuple-unpacking
+
+        previsoes = {}
+        for clf in modelos:
+            print("PREVISAO: {}".format(clf))
+            model = tv.Load_Obj("model_{}_{}_otimizado".format(clf, i))
+            
+            clf_pred_test = model.predict(X_test)
+            clf_pred_proba_test = model.predict_proba(X_test)
+            acc, prec, rec, spec, f_m = tv.calcula_scores(y_test, clf_pred_test)
+            auc = roc_auc_score(y_test, clf_pred_proba_test[:,1])
+            previsoes[clf] = {'ACU': "{:.3f}".format(acc),
+                                            'SEN':"{:.3f}".format(rec),
+                                            'ESP':"{:.3f}".format(spec),
+                                            'PRE':"{:.3f}".format(prec),
+                                            'F-measure':"{:.3f}".format(f_m),
+                                            'AUC': "{:.3f}".format(auc)
+                                        }
+    ############## GERA TABELA COM RESULTADOS DESBALANCEADOS #######################################
+
+        tvr.Gera_Tabela_Latex_Previsoes(previsoes, rodada)
