@@ -58,6 +58,8 @@ from sklearn.exceptions import ConvergenceWarning
 from hyperopt import fmin, tpe, hp, anneal, Trials
 
 import transf_volunt_features as tv
+import transf_volunt_resultados as tvr
+
 
 filterwarnings(action='ignore', category=ConvergenceWarning)
 
@@ -254,12 +256,7 @@ for rodada in desbalanceado:
                                     }
 ############## GERA TABELA COM RESULTADOS DESBALANCEADOS #######################################
 
-    previsoes_df = pd.DataFrame(previsoes)
-    with open("table_result_1_desbalanc"+rodada+".tex", "w") as f:
-        f.write("\\begin{table}[H]\n\\label{table:result:1:desbalanc}\n\\centering\n\\caption{Resumo das métricas para dados desbalanceados sem otimização de hiperparâmetros}\n")
-        f.write(previsoes_df.transpose().to_latex())
-        f.write("\\end{table}")
-    print("Table Latex table_result_1_desbalanc_{}.tex Gerada".format(rodada))
+    tvr.Gera_Tabela_Latex_Previsoes(previsoes, rodada)
 
 ############ GERA FIGURA COM FEATURE IMPORTANCE ###################################################
     tv.Gera_Figura_Feature_Importance(classificadores[0], rodada, feature_names)
@@ -384,7 +381,7 @@ for rodada in desbalanceado:
         model.fit(X_train_cv, y_train_cv)
         
         if type(clf).__name__ == 'XGBClassifier':
-            tv.Gera_Figura_Feature_Importance(model, rodada, feature_names)
+            tv.Gera_Figura_Feature_Importance(model, rodada+'_otimizado', feature_names)
 
         tv.Save_Obj(model, 'model_'+type(clf).__name__+'_'+rodada+'_otimizado')
 
@@ -399,18 +396,23 @@ for rodada in desbalanceado:
                                         'F-measure':"{:.3f}".format(f_m),
                                         'AUC': "{:.3f}".format(auc)
                                     }
-    
-    previsoes_df = pd.DataFrame(previsoes)
-    with open("table_result_1_desbalanc"+rodada+"otimizado.tex", "w") as f:
-        f.write("\\begin{table}[H]\n\\label{table:result:1:desbalanc}\n\\centering\n\\caption{Resumo das métricas para dados desbalanceados sem otimização de hiperparâmetros}\n")
-        f.write(previsoes_df.transpose().to_latex())
-        f.write("\\end{table}")
-    
+########### GERA TABELA COM RESULTADOS DESBALANCEADOS OTIMIZADOS ####################
 
+    tvr.Gera_Tabela_Latex_Previsoes(previsoes, rodada+'_otimizado')
+    
     # %%
     # plotting the results of optimization
     tv.Gera_Figura_Hiperopt_Otimizacao(hyperopt_results, rodada)  
 
-# %%
-# plot_roc_curve(model, X_test, y_test)
-# plot_precision_recall_curve(model, X_test, y_test)
+for rodada in balanceado:
+    print("RODADA BALANCEADO INICIADA - {}".format(rodada))
+    feature_names = tv.Load_Obj('feature_names_' + rodada)
+    X_data, y_data = load_svmlight_file('desbalanceado_' + rodada + '.svm', n_features = len(feature_names))# pylint: disable=unbalanced-tuple-unpacking
+
+    # executa a normalizacao dos dados
+    scaler = StandardScaler(with_mean=False)
+    X_data = scaler.fit_transform(X_data)
+
+    #faz o split entre treino/validacao e teste
+    #stratify mantem a proporcao entre classes pos/neg
+    X_train_cv, X_test, y_train_cv, y_test = train_test_split(X_data, y_data, test_size=0.1, random_state=seed, stratify=y_data)

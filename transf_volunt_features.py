@@ -22,6 +22,9 @@ from imblearn.under_sampling import NearMiss
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib import rcParams
+from matplotlib import style
+
+style.use('fivethirtyeight')
 
 #%%
 ## salva objetos com pickle
@@ -59,6 +62,7 @@ def Dados_Balanceados_Separa_Teste_Onehot_Sem_Municipio_Orgao():
     X_data = scaler.fit_transform(X_data)
 
     X_train_cv, X_test, y_train_cv, y_test = train_test_split(X_data, y_data, test_size=0.1, random_state=6439, stratify=y_data)
+    Save_Obj(scaler, 'scaler_balanceado')
     dump_svmlight_file(X_train_cv, y_train_cv, 'treino_desbalanceado_onehot_sem_municipio_orgao.svm')
     dump_svmlight_file(X_test, y_test, 'test_desbalanceado_onehot_sem_municipio_orgao.svm')
 
@@ -232,6 +236,8 @@ def Dados_Balanceados_SMOTE_NearMiss_Sem_Municipio_Orgao():
     X_res_new, y_res_new = nm.fit_resample(X_res, y_res)
     dump_svmlight_file(X_res_new, y_res_new, 'smote_nearmiss_1_1_onehot_sem_municipio_orgao.svm') 
 
+#%% #######################################################################
+
 def Gera_Figura_Feature_Importance(classificador, nome, feature_names):
     total = 10
     rcParams.update({'figure.autolayout': True})
@@ -241,9 +247,13 @@ def Gera_Figura_Feature_Importance(classificador, nome, feature_names):
     features_sorted = importances.sort_values()
     total_features = features_sorted[-total:]
     total_features.plot.barh(color = cm.rainbow(np.linspace(0,1,total)))# pylint: disable=no-member
+    plt.ylabel("Características")
+    plt.xlabel("Pesos")
+    plt.title("Importâncias das Características do Modelo")
     fig.savefig("feature_importance_{}.png".format(nome))
     print("Figura feature_importance_{}.png Gerada".format(nome))
 
+#%% ##############################################################################
 def Gera_Figura_Hiperopt_Otimizacao(hyperopt_results, nome):
     
     hyperopt_results_df=pd.DataFrame(hyperopt_results,
@@ -311,3 +321,4 @@ def Gera_Figura_Hiperopt_Otimizacao(hyperopt_results, nome):
 
     fig.savefig("hiperparametros_{}.png".format(nome))
     print("Figura hiperparametros_{}.png Gerada".format(nome))
+
