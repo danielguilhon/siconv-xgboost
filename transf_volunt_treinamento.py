@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib import rcParams
 
-from xgboost import XGBClassifier
+from xgboost.sklearn import XGBClassifier
 
 from sklearn.preprocessing import StandardScaler
 
@@ -60,7 +60,6 @@ from hyperopt import fmin, tpe, hp, anneal, Trials
 import transf_volunt_features as tv
 import transf_volunt_resultados as tvr
 
-
 filterwarnings(action='ignore', category=ConvergenceWarning)
 
 ### XGBOOST
@@ -68,7 +67,7 @@ filterwarnings(action='ignore', category=ConvergenceWarning)
 def xgb_cv(params, random_state, cv, X, y):
     # funcao utilizada pelo Hyperopt fmin
     # recebe os params vindo do espaco de busca de hiperparametros
-    params = {  'n_estimators': int(params['n_estimators']), 
+    new_params = {  'n_estimators': int(params['n_estimators']), 
                 'max_depth': int(params['max_depth']), 
                 'learning_rate': params['learning_rate'],
                 'min_child_weight': int(params['min_child_weight']),
@@ -81,16 +80,16 @@ def xgb_cv(params, random_state, cv, X, y):
              }
     
     # para cada chamada, criamos um classificador com os parametros
-    model = XGBClassifier(**params,
+    model = XGBClassifier(**new_params,
                 objective = 'binary:logistic',
-                eval_metric= 'aucpr',
+                eval_metric= 'auc',
                 nthread=4,
                 seed=random_state)
     
     # faz o cross_validation (k-fold, k=10)
     # devemos retornar negativo pois a metrica e minimizada pelo fmin do hyperopt
     # opcoes de scoring: average_precision (simula aucpr), roc_auc, recall, precision, f1
-    score = -cross_val_score(model, X, y, cv=cv, scoring="average_precision", n_jobs=-1).mean()
+    score = -cross_val_score(model, X, y, cv=cv, scoring="roc_auc", n_jobs=-1).mean()
 
     return score
 
@@ -99,16 +98,16 @@ def xgb_cv(params, random_state, cv, X, y):
 def log_cv(params, random_state, cv, X, y):
     # funcao utilizada pelo Hyperopt fmin
     # recebe os params vindo do espaco de busca de hiperparametros
-    params = {  'C': params['C'], 
+    new_params = {  'C': params['C'], 
                 'intercept_scaling': params['intercept_scaling'],
                 'fit_intercept': params['fit_intercept'],
                 'penalty': params['penalty'], # normalizacao L1 ou L2 utilizada
                 'l1_ratio': params['l1_ratio'] # taxa de normalizacao
              }
-    
+
     # utilizamos os parametros passados para criar o modelo
     model = LogisticRegression(
-                **params,
+                **new_params,
                 random_state=seed, # para ser reproduzivel
                 solver='saga',  # algoritmo de otimizacao utilizado
                 class_weight = 'balanced' #dá o devido peso ao balanceamento entre classes
@@ -117,7 +116,7 @@ def log_cv(params, random_state, cv, X, y):
     # faz o cross_validation  (k-fold, k=10)
     # devemos retornar negativo pois a metrica e minimizada pelo fmin do hyperopt
     # opcoes de scoring: average_precision (simula aucpr), roc_auc, recall, precision, f1
-    score = -cross_val_score(model, X, y, cv=cv, scoring="average_precision", n_jobs=-1).mean()
+    score = -cross_val_score(model, X, y, cv=cv, scoring="roc_auc", n_jobs=-1).mean()
 
     return score
 
@@ -128,22 +127,23 @@ def mlp_cv(params, random_state, cv, X, y):
     # funcao utilizada pelo Hyperopt fmin
     # recebe os params vindo do espaco de busca de hiperparametros
     
-    params = {
+    new_params = {
+            'learning_rate_init': params['learning_rate_init'],
             'hidden_layer_sizes': params['hidden_layer_sizes'],
             'alpha': params['alpha'],
             'activation': params['activation'],
             'solver': params['solver']
              }
-    
+
     # utilizamos os parametros passados para criar o modelo
     model = MLPClassifier(
-                **params,
+                **new_params,
                 )
     
     # faz o cross_validation  (k-fold, k=10)
     # devemos retornar negativo pois a metrica eh minimizada pelo fmin do hyperopt
     # opcoes de scoring: average_precision (simula aucpr), roc_auc, recall, precision, f1
-    score = -cross_val_score(model, X, y, cv=cv, scoring="average_precision", n_jobs=-1).mean()
+    score = -cross_val_score(model, X, y, cv=cv, scoring="roc_auc", n_jobs=-1).mean()
 
     return score
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% DEFINICOES INICIAIS %%%%%%%%%%%%%%%%%%%%%%
@@ -153,13 +153,13 @@ seed = 6439
 # k-fold estratificado, preserva a proposcao de positivos e negativos
 kf = StratifiedKFold(n_splits=10)
 # controla a quantidade de iteracoes de otimizacao q sera feita pelo Hyperopt
-n_iter = 1
+n_iter = 20
 
 desbalanceado = ['onehot_all', 'onehot_sem_municipio', 'onehot_sem_municipio_orgao']
 
 balanceado = ['smote_10_1', 'smote_5_1', 'smote_1_1',
- 'nearmiss_10_1', 'nearmiss_5_1', 'nearmiss_1_1'
- 'smote_nearmiss_10_1', 'smote_nearmiss_5_1', 'smote_nearmiss_1_1']
+ 'nearmiss_10_1', 'nearmiss_5_1', 'nearmiss_1_1',
+ 'smotenearmiss_10_1', 'smotenearmiss_5_1', 'smotenearmiss_1_1']
 
 
 ##################################################################################
@@ -201,7 +201,7 @@ for rodada in desbalanceado:
                     alpha = 0,
                     scale_pos_weight = 20,
                     objective = 'binary:logistic',
-                    eval_metric= 'aucpr',
+                    eval_metric= 'auc',
                     n_estimators=150,
                     n_jobs=-1,
                     seed=seed
@@ -224,7 +224,7 @@ for rodada in desbalanceado:
                     learning_rate="constant", 
                     learning_rate_init=0.001, 
                     power_t=0.5, 
-                    max_iter=200, 
+                    max_iter=500, 
                     shuffle=True, 
                     tol=1e-4, 
                     momentum=0.9, 
@@ -270,6 +270,7 @@ for rodada in desbalanceado:
         neg_pos_rate = 20
         # espaco de busca
         if type(clf).__name__ == 'XGBClassifier':
+
             space={ 'n_estimators': hp.uniformint('n_estimators', 50, 250),
                     'max_depth' : hp.uniformint('max_depth', 1, 14),
                     'learning_rate': hp.loguniform('learning_rate', -5, 0),
@@ -299,7 +300,7 @@ for rodada in desbalanceado:
             mlp_activation = ['relu', 'logistic', 'tanh']
             mlp_solver = ['sgd', 'adam']
             space = {
-                'learning_rate': hp.loguniform('learning_rate', -6.9, 0.0),
+                'learning_rate_init': hp.loguniform('learning_rate_init', -6.9, 0.0),
                 'hidden_layer_sizes': hp.uniformint('hidden_layer_sizes', 10, 100),
                 'alpha': hp.loguniform('alpha', -8*np.log(10), 3*np.log(10)),
                 'activation': hp.choice('activation', mlp_activation),
@@ -309,7 +310,7 @@ for rodada in desbalanceado:
         # trials will contain logging information
         trials = Trials()
         #opcoes para otimizacao sao tpe.suggest e anneal.suggest
-        otimiza = anneal.suggest
+        otimiza = tpe.suggest
  
         best = fmin(fn=func_obj, # function to optimize
                 space=space, #search space
@@ -330,11 +331,11 @@ for rodada in desbalanceado:
                 'gamma': best['gamma'],
                 'colsample_bytree': best['colsample_bytree'],
                 'alpha': int(best['alpha']),
-                'lambda': best['lambda'],
+                'lambda': best['lambda']
             }
             model = XGBClassifier(**best_params,
-                                    objective = 'binary:logistic',
-                                    eval_metric= 'aucpr',
+                                    #objective = 'binary:logistic',
+                                    eval_metric= 'auc',
                                     nthread=4,
                                     scale_pos_weight=neg_pos_rate,
                                     seed=seed
@@ -369,6 +370,7 @@ for rodada in desbalanceado:
         if type(clf).__name__ == 'MLPClassifier':
 
             best_params = { 
+                'learning_rate_init': best['learning_rate_init'],
                 'hidden_layer_sizes': int(best['hidden_layer_sizes']),
                 'alpha': best['alpha'],
                 'activation': mlp_activation[best['activation']],
@@ -402,8 +404,9 @@ for rodada in desbalanceado:
     
     # %%
     # plotting the results of optimization
-    tv.Gera_Figura_Hiperopt_Otimizacao(hyperopt_results, rodada)  
+    tv.Gera_Figura_Hiperopt_Otimizacao(hyperopt_results, rodada)
 
+#%%
 # ['smote_10_1', 'smote_5_1', 'smote_1_1',
 #  'nearmiss_10_1', 'nearmiss_5_1', 'nearmiss_1_1'
 #  'smote_nearmiss_10_1', 'smote_nearmiss_5_1', 'smote_nearmiss_1_1']
@@ -412,9 +415,9 @@ for rodada in desbalanceado:
 
 modelos = ['XGBClassifier', 'LogisticRegression', 'MLPClassifier']
 
-desbalanceado = ['onehot_sem_municipio_orgao']
-
+previsoes = {}
 for i in desbalanceado:
+    previsoes[i] = {}
     for balanc in balanceado:
         rodada = balanc+'_'+i
         print("RODADA BALANCEADO INICIADA - {}".format(rodada))
@@ -422,16 +425,21 @@ for i in desbalanceado:
         X_train_cv, y_train_cv = load_svmlight_file(rodada + '.svm', n_features = len(feature_names))# pylint: disable=unbalanced-tuple-unpacking
         X_test, y_test = load_svmlight_file('test_desbalanceado_'+i+'.svm', n_features = len(feature_names))# pylint: disable=unbalanced-tuple-unpacking
 
-        previsoes = {}
+        previsoes[i][balanc] = {}
         for clf in modelos:
             print("PREVISAO: {}".format(clf))
             model = tv.Load_Obj("model_{}_{}_otimizado".format(clf, i))
+            if clf == 'XGBClassifier':
+                model.set_params(scale_pos_weight=balanc.split("_")[1])
+
+            model.fit(X_train_cv, y_train_cv)
+            tv.Save_Obj(model, "model_{}_{}_{}_anterior".format(clf,balanc,i))
             
             clf_pred_test = model.predict(X_test)
             clf_pred_proba_test = model.predict_proba(X_test)
             acc, prec, rec, spec, f_m = tv.calcula_scores(y_test, clf_pred_test)
             auc = roc_auc_score(y_test, clf_pred_proba_test[:,1])
-            previsoes[clf] = {'ACU': "{:.3f}".format(acc),
+            previsoes[i][balanc][clf] = {'ACU': "{:.3f}".format(acc),
                                             'SEN':"{:.3f}".format(rec),
                                             'ESP':"{:.3f}".format(spec),
                                             'PRE':"{:.3f}".format(prec),
@@ -440,4 +448,6 @@ for i in desbalanceado:
                                         }
     ############## GERA TABELA COM RESULTADOS DESBALANCEADOS #######################################
 
-        tvr.Gera_Tabela_Latex_Previsoes(previsoes, rodada)
+tvr.Gera_Tabela_Latex_Previsoes(previsoes, rodada)
+
+# %%

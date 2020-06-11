@@ -8,7 +8,7 @@ from sqlalchemy import create_engine
 from sklearn.datasets import dump_svmlight_file
 from sklearn.datasets import load_svmlight_file
 
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import MaxAbsScaler
 
 from sklearn.model_selection import train_test_split
 
@@ -24,7 +24,11 @@ from matplotlib import cm
 from matplotlib import rcParams
 from matplotlib import style
 
-style.use('fivethirtyeight')
+style.use('seaborn-whitegrid')
+rcParams.update({'figure.autolayout': True,
+                'savefig.edgecolor': 'black',
+                'savefig.facecolor': 'white'
+                })
 
 #%%
 ## salva objetos com pickle
@@ -49,9 +53,39 @@ def calcula_scores(y_true, model_prediction):
 
     return accuracy, precision, recall, specificity, f_measure
 
+
+#%%
+def Dados_Banco_Pickle():
+    engine = create_engine("mysql+pymysql://root:Siconv!@localhost/siconv", pool_pre_ping=True,  connect_args = {'use_unicode':True, 'charset':'utf8mb4'})
+    tbl_features_df = pd.read_sql_table('features',engine)
+    #cria coluna com faixa de valores relativos ao valor possivel da licitacao
+    tbl_features_df['FAIXA_VALOR'] = pd.cut(tbl_features_df.VL_GLOBAL_CONV, 
+                                bins=[0,33000,330000,3300000,np.Inf], 
+                                labels=["dispensa", "convite", "tomada", "concorrencia"]
+                                )
+
+    y_data = tbl_features_df.TARGET.values
+
+    X_data = tbl_features_df.drop(['index', 'NR_CONVENIO', 'ID_PROPOSTA', 'SIT_CONVENIO', 
+                'VL_GLOBAL_CONV', 'VL_REPASSE_CONV', 'VL_CONTRAPARTIDA_CONV', 'VL_DESEMBOLSADO_CONV',
+                'TARGET', 'IDENTIF_PROPONENTE'], axis=1)
+
+    X_new = X_data.astype({'FAIXA_VALOR': 'object', 
+                        'QTD_TA':'float64',
+                        'QTD_PRORROGA':'float64',
+                        'MES':'object',
+                        'QTDE_CONVENIOS':'float64',
+                        'EMENDAS':'float64',
+                        'CNPJS_CONSORCIOS':'float64',
+                        'DIF_ORIG':'float64',
+                        'DIF_PRORROG':'float64'})
+
+    Save_Obj(y_data, 'y_data_all')
+    Save_Obj(X_new, 'X_data_all')
+
 #%%####################################################################
 '''
-cria arquivos svm com features categoricas (sem one hot e sem scaling)
+cria arquivos svm com features 
 desbalanceadas, já dando um dump nos arquivos.
 '''
 def Dados_Desbalanceados_Onehot_All():
@@ -62,10 +96,12 @@ def Dados_Desbalanceados_Onehot_All():
                                 bins=[0,33000,330000,3300000,np.Inf], 
                                 labels=["dispensa", "convite", "tomada", "concorrencia"]
                                 )
+    null_idx = pd.isnull(tbl_features_df.loc[:,'SITUACAO_PROJETO_BASICO'])
+    tbl_features_df.loc[null_idx, 'SITUACAO_PROJETO_BASICO'] = 'missing'
     # cria vetores onehot para as variaveis categoricas
     convenios_dummies_df = pd.get_dummies(tbl_features_df, columns=['UF_PROPONENTE','MODALIDADE',
             'SITUACAO_CONTA','SITUACAO_PROJETO_BASICO', 'COD_MUNIC_IBGE','COD_ORGAO_SUP', 
-            'COD_ORGAO', 'FAIXA_VALOR'])
+            'COD_ORGAO', 'FAIXA_VALOR', 'MES'])
     #embaralha
     convenios_dummies_df_shuffle = shuffle(convenios_dummies_df)
     data_full = convenios_dummies_df_shuffle.copy()
@@ -155,11 +191,12 @@ def Dados_Balanceados_Separa_Teste_Onehot_Sem_Municipio_Orgao():
     feature_names = Load_Obj('feature_names_onehot_sem_municipio_orgao')
     X_data, y_data = load_svmlight_file('desbalanceado_onehot_sem_municipio_orgao.svm', n_features = len(feature_names))# pylint: disable=unbalanced-tuple-unpacking
     
-    scaler = StandardScaler(with_mean=False)
-    X_data = scaler.fit_transform(X_data)
+    scaler = MaxAbsScaler()
+    X_data_fit = scaler.fit_transform(X_data)
+    Save_Obj(scaler, 'scaler_onehot_sem_municipio_orgao')
 
-    X_train_cv, X_test, y_train_cv, y_test = train_test_split(X_data, y_data, test_size=0.1, random_state=6439, stratify=y_data)
-    Save_Obj(scaler, 'scaler_balanceado')
+    X_train_cv, X_test, y_train_cv, y_test = train_test_split(X_data_fit, y_data, test_size=0.1, random_state=6439, stratify=y_data)
+    
     dump_svmlight_file(X_train_cv, y_train_cv, 'treino_desbalanceado_onehot_sem_municipio_orgao.svm')
     dump_svmlight_file(X_test, y_test, 'test_desbalanceado_onehot_sem_municipio_orgao.svm')
 
@@ -174,7 +211,7 @@ def Dados_Balanceados_SMOTE_Sem_Municipio_Orgao():
     #sampling_strategy = 0.2 ==> 5 x 1
     #sampling_strategy = 1 ==> 1 x 1
     feature_names = Load_Obj('feature_names_onehot_sem_municipio_orgao')
-    X_data, y_data = load_svmlight_file('treino_desbalanceado_onehot_sem_municipio_orgao.svm', n_features = len(feature_names))# pylint: disable=unbalanced-tuple-unpacking
+    X_data, y_data = load_svmlight_file('desbalanceado_onehot_sem_municipio_orgao.svm', n_features = len(feature_names))# pylint: disable=unbalanced-tuple-unpacking
 
     sm = SMOTE(random_state=6439, sampling_strategy=0.1)
     X_res, y_res = sm.fit_resample(X_data, y_data)
@@ -238,18 +275,33 @@ def Dados_Balanceados_SMOTE_NearMiss_Sem_Municipio_Orgao():
     dump_svmlight_file(X_res_new, y_res_new, 'smote_nearmiss_1_1_onehot_sem_municipio_orgao.svm') 
 
 #%%####################################################################
+def Gera_Treino_Teste(qtde, caract):
+
+    feature_names = tv.Load_Obj('feature_names_' + caract)
+    X_data, y_data = load_svmlight_file('desbalanceado_' + caract + '.svm', n_features = len(feature_names))# pylint: disable=unbalanced-tuple-unpacking
+    # executa a normalizacao dos dados
+    scaler = StandardScaler(with_mean=False)
+    X_data = scaler.fit_transform(X_data)
+
+    for i in range(qtde):
+        #faz o split entre treino/validacao e teste
+        #stratify mantem a proporcao entre classes pos/neg
+        X_train_cv, X_test, y_train_cv, y_test = train_test_split(X_data, y_data, test_size=0.1, random_state=np.random.RandomState(), stratify=y_data)
+
+#%%####################################################################
 def Gera_Figura_Feature_Importance(classificador, nome, feature_names):
     total = 10
-    rcParams.update({'figure.autolayout': True})
-    fig = plt.figure(figsize=(10,5))
+    fig = plt.figure(figsize=(10,6))
     #plot importances do xgb
     importances = pd.Series(classificador.feature_importances_, feature_names)
     features_sorted = importances.sort_values()
     total_features = features_sorted[-total:]
-    total_features.plot.barh(color = cm.rainbow(np.linspace(0,1,total)))# pylint: disable=no-member
-    plt.ylabel("Características")
-    plt.xlabel("Pesos")
-    plt.title("Importâncias das Características do Modelo")
+    barh = total_features.plot.barh(color = cm.rainbow(np.linspace(0,1,total)))# pylint: disable=no-member
+    barh.set_ylabel("Características", fontsize=24)
+    barh.set_xlabel("Pesos", fontsize=24)
+    barh.set_title(" ", fontsize=30)
+    fig.suptitle("Importâncias das Características do Modelo", fontsize=28)
+    fig.tight_layout()
     fig.savefig("feature_importance_{}.png".format(nome))
     print("Figura feature_importance_{}.png Gerada".format(nome))
 
@@ -260,7 +312,7 @@ def Gera_Figura_Hiperopt_Otimizacao(hyperopt_results, nome):
                             columns=['score', 'learning_rate', 'max_depth', 'min_child_weight',
                                 'n_estimators', 'colsample_bytree', 'subsample', 'gamma', 'alpha','lambda'])
 
-    rcParams.update({'figure.autolayout': True})
+    
     fig, ax1 = plt.subplots(figsize=(10, 5))
 
     color = 'tab:blue'
@@ -318,7 +370,7 @@ def Gera_Figura_Hiperopt_Otimizacao(hyperopt_results, nome):
     lines = line1+line2+line3+line4+line5+line6+line7+line8+line9+line10
     labs = [l.get_label() for l in lines]
     ax1.legend(lines, labs, loc=0)
-
+    fig.tight_layout()
     fig.savefig("hiperparametros_{}.png".format(nome))
     print("Figura hiperparametros_{}.png Gerada".format(nome))
 
