@@ -26,6 +26,15 @@ from matplotlib import rcParams
 from xgboost.sklearn import XGBClassifier
 
 from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import OrdinalEncoder
+from sklearn.preprocessing import MaxAbsScaler
+from sklearn.preprocessing import OneHotEncoder
+
+from sklearn.impute import SimpleImputer
+
+from sklearn.pipeline import Pipeline
+
+from sklearn.compose import ColumnTransformer
 
 from sklearn.linear_model import LogisticRegression
 
@@ -54,6 +63,13 @@ from sklearn.metrics import plot_roc_curve
 from sklearn.metrics import classification_report
 
 from sklearn.exceptions import ConvergenceWarning
+
+from imblearn.pipeline import Pipeline as imbpipe
+
+from imblearn.over_sampling import SMOTE
+from imblearn.over_sampling import SMOTENC
+
+from imblearn.under_sampling import NearMiss
 
 from hyperopt import fmin, tpe, hp, anneal, Trials
 
@@ -155,44 +171,94 @@ kf = StratifiedKFold(n_splits=10)
 # controla a quantidade de iteracoes de otimizacao q sera feita pelo Hyperopt
 n_iter = 20
 
-desbalanceado = ['onehot_all', 'onehot_sem_municipio', 'onehot_sem_municipio_orgao']
-
-balanceado = ['smote_10_1', 'smote_5_1', 'smote_1_1',
- 'nearmiss_10_1', 'nearmiss_5_1', 'nearmiss_1_1',
- 'smotenearmiss_10_1', 'smotenearmiss_5_1', 'smotenearmiss_1_1']
-
+dados = ['all', 'sem_municipio', 'sem_municipio_orgao']
 
 ##################################################################################
 
 #%%%%%%%%%%%%%%%%%%% TRAIN %%%%%%%%%%%%%%%%%%%%%%
-# feature_names e X_data, y_data  dependem da base q sera utilizada
-# geramos varias bases com features diferentes, com apenas 1 orgao (22000), etc
-# balanceado vs desbalanceado
-# categoricos one_hot, features normalizadas, 
-# outras mais para igualar a comparação dos testes. 
 ############ DADOS DESBALANCEADOS #########################################################
 ############ loop para ler os dados em formato onehot #####################################
-for rodada in desbalanceado:
-    print("RODADA INICIADA - {}".format(rodada))
-    feature_names = tv.Load_Obj('feature_names_' + rodada)
-    X_data, y_data = load_svmlight_file('desbalanceado_' + rodada + '.svm', n_features = len(feature_names))# pylint: disable=unbalanced-tuple-unpacking
+y = tv.Load_Obj('y_data')
 
-    # executa a normalizacao dos dados
-    scaler = StandardScaler(with_mean=False)
-    X_data = scaler.fit_transform(X_data)
+previsoes = {}
+
+for rodada in dados:
+    print("RODADA INICIADA - {}".format(rodada))
+    
+    #dados originais, em formato pandas.DataFrame
+    X = tv.Load_Obj('X_data_'+rodada)
+ 
+    #vamos separar colunas categoricas e numericas para aplicar o preprocessamento
+    cat_cols = X.columns[X.dtypes == 'O']
+    num_cols = X.columns[X.dtypes == 'float64']
+
+    #indice de cada coluna categorica
+    cols_idx = []
+    col_list = X.columns.tolist()
+    for col in num_cols:
+        cols_idx.append(col_list.index(col))
+    for col in cat_cols:
+        cols_idx.append(col_list.index(col))
+
+    feature_names = X.columns.values[cols_idx]
+
+    categories = [
+        X[column].unique() for column in X[cat_cols]]
+
+    for cat in categories:
+        cat[cat == None] = 'missing'  # noqa
+
+    #transformation para as colunas categoricas
+    #valores nulos sao preenchidos com missing
+    #ordinalencoder criar categorias numericas
+    cat_transf_tree = Pipeline(steps=[
+        ('simpleimputer', SimpleImputer(missing_values=None, strategy='constant', fill_value='missing')),
+        ('ordinalencoder', OrdinalEncoder(categories=categories))
+    ])
+    #transformarion para colunas numericas
+    #para modelos de arvore, nao usamos o scaler
+    num_transf_tree = Pipeline(steps=[
+        ('simpleimputer', SimpleImputer(strategy='mean'))
+    ])
+    #pipeline para executar as transformacao
+    column_transf_tree = ColumnTransformer(transformers=[
+        ('numericos', num_transf_tree, num_cols),
+        ('categoricos', cat_transf_tree, cat_cols)
+    ], remainder='passthrough')
+        
+    #transformatio categoricos para usar com LR e MLP
+    #substitui null por missing
+    #utiliza onehot enconding
+    cat_transf_linear = Pipeline(steps=[
+        ('simpleimputer', SimpleImputer(missing_values=None,strategy='constant',fill_value='missing')),
+        ('onehotencoder', OneHotEncoder(categories=categories))
+    ])
+    #transformation numerico
+    num_transf_linear = Pipeline(steps=[
+        ('simpleimputer', SimpleImputer(strategy='mean')),
+        ('standardscaler', StandardScaler())
+    ])
+    # pipeline da transformacao para LR e MLP
+    column_transf_linear = ColumnTransformer(transformers=[
+            ('numericos', num_transf_linear, num_cols),
+            ('categoricos', cat_transf_linear, cat_cols)
+        ], remainder='passthrough')
+
+    #executa a transformacao para tree e LR e MLP
+    X_tree = column_transf_tree.fit_transform(X)
+    X_linear = column_transf_linear.fit_transform(X)
 
     #faz o split entre treino/validacao e teste
     #stratify mantem a proporcao entre classes pos/neg
-    X_train_cv, X_test, y_train_cv, y_test = train_test_split(X_data, y_data, test_size=0.1, random_state=seed, stratify=y_data)
+    X_train_tree, X_test_tree, y_train_tree, y_test_tree = train_test_split(X_tree, y, test_size=0.1, random_state=seed, stratify=y)
+    X_train_linear, X_test_linear, y_train_linear, y_test_linear = train_test_split(X_linear, y, test_size=0.1, random_state=seed, stratify=y)
 
-    tv.Save_Obj(X_test, 'X_test_'+rodada)
-    tv.Save_Obj(X_test, 'y_test_'+rodada)
-    
     #%% main loop 
 ################### CLASSIFICACAO INICIAL COM PARAMETROS PADRAO
 
     clf_xgb = XGBClassifier( #default parameters
                     learning_rate=0.3,
+                    base_score=0.5,
                     gamma=0,
                     max_depth = 6,
                     subsample=1,
@@ -239,37 +305,52 @@ for rodada in desbalanceado:
 
     classificadores = [clf_xgb, clf_log, clf_mlp]
 
-    previsoes = {}
+    previsoes[rodada] = {}
     for clf in classificadores:
         print("FIT Desbalanceado: {}".format(type(clf).__name__))
-        clf.fit(X_train_cv, y_train_cv)
+        if type(clf).__name__ == 'XGBClassifier':
+            X_train = X_train_tree.copy()
+            y_train = y_train_tree.copy()
+            X_test = X_test_tree.copy()
+            y_test = y_test_tree.copy()
+        else:
+            X_train = X_train_linear.copy()
+            y_train = y_train_linear.copy()
+            X_test = X_test_linear.copy()
+            y_test = y_test_linear.copy()
+        
+        clf.fit(X_train, y_train)
         clf_pred_test = clf.predict(X_test)
         clf_pred_proba_test = clf.predict_proba(X_test)
         acc, prec, rec, spec, f_m = tv.calcula_scores(y_test, clf_pred_test)
         auc = roc_auc_score(y_test, clf_pred_proba_test[:,1])
-        previsoes[type(clf).__name__] = {'ACU': "{:.3f}".format(acc),
+        previsoes[rodada][type(clf).__name__] = {'ACU': "{:.3f}".format(acc),
                                         'SEN':"{:.3f}".format(rec),
                                         'ESP':"{:.3f}".format(spec),
                                         'PRE':"{:.3f}".format(prec),
                                         'F-measure':"{:.3f}".format(f_m),
                                         'AUC': "{:.3f}".format(auc)
                                     }
-############## GERA TABELA COM RESULTADOS DESBALANCEADOS #######################################
-
+    tv.Save_Obj(previsoes, 'previsoes_nao_otimizado_'+rodada)
     tvr.Gera_Tabela_Latex_Previsoes(previsoes, rodada)
 
-############ GERA FIGURA COM FEATURE IMPORTANCE ###################################################
     tv.Gera_Figura_Feature_Importance(classificadores[0], rodada, feature_names)
 
 ############ OTIMIZAÇÃO #########################################################################
     # sum(negative instances) / sum(positive instances)
     # scale_pos_weight eh a proporcao neg/ pos
     # vamos utilizar 20, 10, 5, 1
-    previsoes = {}
+
+    previsoes[rodada] = {}
     for clf in classificadores:
         neg_pos_rate = 20
         # espaco de busca
         if type(clf).__name__ == 'XGBClassifier':
+            
+            X_train = X_train_tree.copy()
+            y_train = y_train_tree.copy()
+            X_test = X_test_tree.copy()
+            y_test = y_test_tree.copy()
 
             space={ 'n_estimators': hp.uniformint('n_estimators', 50, 250),
                     'max_depth' : hp.uniformint('max_depth', 1, 14),
@@ -282,9 +363,15 @@ for rodada in desbalanceado:
                     'lambda': hp.uniform('lambda', 1.0, 2.0),
                     'scale_pos_weight': neg_pos_rate
                 }
-            func_obj = partial(xgb_cv, random_state=seed, cv=kf, X=X_train_cv, y=y_train_cv)
+            func = xgb_cv
 
         if type(clf).__name__ == 'LogisticRegression':
+            
+            X_train = X_train_linear.copy()
+            y_train = y_train_linear.copy()
+            X_test = X_test_linear.copy()
+            y_test = y_test_linear.copy()
+
             logit_fit = [False, True]
             logit_penalty = ['elasticnet']#['l1','l2'] #elasticnet e mais flexivel, com l1_ratio 0, vira L2, em 1, vira L1
             space = {
@@ -294,9 +381,15 @@ for rodada in desbalanceado:
                 'penalty': hp.choice('penalty', logit_penalty), # normalizacao L1 ou L2 utilizada
                 'l1_ratio': hp.uniform('l1_ratio', 0, 1) # taxa de normalizacao 0 < l1_ratio <1, combinacao L1/L2.
             }
-            func_obj = partial(log_cv, random_state=seed, cv=kf, X=X_train_cv, y=y_train_cv)
+            func = log_cv
         
         if type(clf).__name__ == 'MLPClassifier':
+
+            X_train = X_train_linear.copy()
+            y_train = y_train_linear.copy()
+            X_test = X_test_linear.copy()
+            y_test = y_test_linear.copy()
+
             mlp_activation = ['relu', 'logistic', 'tanh']
             mlp_solver = ['sgd', 'adam']
             space = {
@@ -306,12 +399,12 @@ for rodada in desbalanceado:
                 'activation': hp.choice('activation', mlp_activation),
                 'solver': hp.choice('solver', mlp_solver)
             }
-            func_obj = partial(mlp_cv, random_state=seed, cv=kf, X=X_train_cv, y=y_train_cv)
+            func = mlp_cv
         # trials will contain logging information
         trials = Trials()
         #opcoes para otimizacao sao tpe.suggest e anneal.suggest
-        otimiza = tpe.suggest
- 
+        otimiza = anneal.suggest
+        func_obj = partial(func, random_state=seed, cv=kf, X=X_train, y=y_train)
         best = fmin(fn=func_obj, # function to optimize
                 space=space, #search space
                 algo=otimiza, # optimization algorithm, hyperotp will select its parameters automatically
@@ -333,13 +426,7 @@ for rodada in desbalanceado:
                 'alpha': int(best['alpha']),
                 'lambda': best['lambda']
             }
-            model = XGBClassifier(**best_params,
-                                    #objective = 'binary:logistic',
-                                    eval_metric= 'auc',
-                                    nthread=4,
-                                    scale_pos_weight=neg_pos_rate,
-                                    seed=seed
-                                )
+
             hyperopt_results=np.array([[-x['result']['loss'],
                       x['misc']['vals']['learning_rate'][0],
                       x['misc']['vals']['max_depth'][0],
@@ -350,6 +437,8 @@ for rodada in desbalanceado:
                       x['misc']['vals']['gamma'][0],
                       x['misc']['vals']['alpha'][0],
                       x['misc']['vals']['lambda'][0]] for x in trials.trials])
+            
+            tv.Save_Obj(hyperopt_results, 'hyperopt_results')
 
         if type(clf).__name__ == 'LogisticRegression':
             
@@ -360,12 +449,6 @@ for rodada in desbalanceado:
                 'fit_intercept': logit_fit[best['fit_intercept']],
                 'l1_ratio': best['l1_ratio']
             }
-            model = LogisticRegression(**best_params,
-                                    random_state=seed,
-                                    n_jobs = -1,
-                                    solver='saga',
-                                    class_weight = 'balanced',
-                                )
 
         if type(clf).__name__ == 'MLPClassifier':
 
@@ -376,78 +459,86 @@ for rodada in desbalanceado:
                 'activation': mlp_activation[best['activation']],
                 'solver': mlp_solver[best['solver']]
             }
-            model = MLPClassifier(**best_params,
-                        random_state=seed,
-                    )
 
-        model.fit(X_train_cv, y_train_cv)
+        clf.set_params(**best_params)
+        clf.fit(X_train, y_train)
         
         if type(clf).__name__ == 'XGBClassifier':
-            tv.Gera_Figura_Feature_Importance(model, rodada+'_otimizado', feature_names)
+            tv.Gera_Figura_Feature_Importance(clf, rodada+'_otimizado', feature_names)
 
-        tv.Save_Obj(model, 'model_'+type(clf).__name__+'_'+rodada+'_otimizado')
+        tv.Save_Obj(clf, 'model_'+type(clf).__name__+'_'+rodada+'_otimizado')
 
-        clf_pred_test = model.predict(X_test)
-        clf_pred_proba_test = model.predict_proba(X_test)
+        clf_pred_test = clf.predict(X_test)
+        clf_pred_proba_test = clf.predict_proba(X_test)
         acc, prec, rec, spec, f_m = tv.calcula_scores(y_test, clf_pred_test)
         auc = roc_auc_score(y_test, clf_pred_proba_test[:,1])
-        previsoes[type(clf).__name__] = {'ACU': "{:.3f}".format(acc),
+        previsoes[rodada][type(clf).__name__] = {'ACU': "{:.3f}".format(acc),
                                         'SEN':"{:.3f}".format(rec),
                                         'ESP':"{:.3f}".format(spec),
                                         'PRE':"{:.3f}".format(prec),
                                         'F-measure':"{:.3f}".format(f_m),
                                         'AUC': "{:.3f}".format(auc)
                                     }
-########### GERA TABELA COM RESULTADOS DESBALANCEADOS OTIMIZADOS ####################
 
-    tvr.Gera_Tabela_Latex_Previsoes(previsoes, rodada+'_otimizado')
-    
-    # %%
+########### GERA TABELA COM RESULTADOS DESBALANCEADOS OTIMIZADOS ####################
+    tv.Save_Obj(previsoes, 'previsoes_otimizado_'+rodada)
+    tvr.Gera_Tabela_Latex_Previsoes(previsoes['all'], rodada+'_otimizado')
+
     # plotting the results of optimization
     tv.Gera_Figura_Hiperopt_Otimizacao(hyperopt_results, rodada)
 
-#%%
-# ['smote_10_1', 'smote_5_1', 'smote_1_1',
-#  'nearmiss_10_1', 'nearmiss_5_1', 'nearmiss_1_1'
-#  'smote_nearmiss_10_1', 'smote_nearmiss_5_1', 'smote_nearmiss_1_1']
+    neg_pos = [10, 5, 1]
+    sm = SMOTE(random_state=seed)
+    nm = NearMiss()
+    smnm = imbpipe(steps=[('smote', sm), ('nearmiss', nm) ])
 
-#### o XGBClassifier está atomizado para 20 x 1 pos_neg_scale = 20
+    resamplers=[sm, nm, smnm]
+    previsoes[rodada] = {}
+    for i in neg_pos:
 
-modelos = ['XGBClassifier', 'LogisticRegression', 'MLPClassifier']
+        taxa = 1/i
 
-previsoes = {}
-for i in desbalanceado:
-    previsoes[i] = {}
-    for balanc in balanceado:
-        rodada = balanc+'_'+i
-        print("RODADA BALANCEADO INICIADA - {}".format(rodada))
-        feature_names = tv.Load_Obj('feature_names_' + i)
-        X_train_cv, y_train_cv = load_svmlight_file(rodada + '.svm', n_features = len(feature_names))# pylint: disable=unbalanced-tuple-unpacking
-        X_test, y_test = load_svmlight_file('test_desbalanceado_'+i+'.svm', n_features = len(feature_names))# pylint: disable=unbalanced-tuple-unpacking
-
-        previsoes[i][balanc] = {}
-        for clf in modelos:
-            print("PREVISAO: {}".format(clf))
-            model = tv.Load_Obj("model_{}_{}_otimizado".format(clf, i))
-            if clf == 'XGBClassifier':
-                model.set_params(scale_pos_weight=balanc.split("_")[1])
-
-            model.fit(X_train_cv, y_train_cv)
-            tv.Save_Obj(model, "model_{}_{}_{}_anterior".format(clf,balanc,i))
+        previsoes[rodada][str(i)+'x1'] = {}
+        for sampler in resamplers:
             
-            clf_pred_test = model.predict(X_test)
-            clf_pred_proba_test = model.predict_proba(X_test)
-            acc, prec, rec, spec, f_m = tv.calcula_scores(y_test, clf_pred_test)
-            auc = roc_auc_score(y_test, clf_pred_proba_test[:,1])
-            previsoes[i][balanc][clf] = {'ACU': "{:.3f}".format(acc),
-                                            'SEN':"{:.3f}".format(rec),
-                                            'ESP':"{:.3f}".format(spec),
-                                            'PRE':"{:.3f}".format(prec),
-                                            'F-measure':"{:.3f}".format(f_m),
-                                            'AUC': "{:.3f}".format(auc)
-                                        }
-    ############## GERA TABELA COM RESULTADOS DESBALANCEADOS #######################################
+            if(type(sampler).__name__ == 'Pipeline'):
+                sampler.set_params(steps=[('smote', sm), ('nearmiss', nm)])
+            else:
+                sampler.set_params(sampling_strategy=taxa)
+            
+            X_train_tree_res, y_train_tree_res = sampler.fit_resample(X_train_tree, y_train_tree)
+            X_train_linear_res, y_train_linear_res = sampler.fit_resample(X_train_linear, y_train_linear)
+            
+            previsoes[rodada][str(i)+'x1'][type(sampler).__name__] = {}
+            for clf in classificadores:
+                if type(clf).__name__ == 'XGBClassifier':
+                    
+                    clf.set_params(scale_pos_weight=i)
+                    
+                    X_train = X_train_tree_res.copy()
+                    y_train = y_train_tree_res.copy()
+                    X_test = X_test_tree.copy()
+                    y_test = y_test_tree.copy()
+                else:
+                    X_train = X_train_linear_res.copy()
+                    y_train = y_train_linear_res.copy()
+                    X_test = X_test_linear.copy()
+                    y_test = y_test_linear.copy()
+                
+                clf.fit(X_train, y_train)
+                clf_pred_test = clf.predict(X_test)
+                clf_pred_proba_test = clf.predict_proba(X_test)
 
-tvr.Gera_Tabela_Latex_Previsoes(previsoes, rodada)
+                acc, prec, rec, spec, f_m = tv.calcula_scores(y_test, clf_pred_test)
+                auc = roc_auc_score(y_test, clf_pred_proba_test[:,1])
 
-# %%
+                previsoes[rodada][str(i)+'x1'][type(sampler).__name__][type(clf).__name__] = {'ACU': "{:.3f}".format(acc),
+                    'SEN':"{:.3f}".format(rec),
+                    'ESP':"{:.3f}".format(spec),
+                    'PRE':"{:.3f}".format(prec),
+                    'F-measure':"{:.3f}".format(f_m),
+                    'AUC': "{:.3f}".format(auc)
+                }
+
+    tv.Save_Obj(previsoes, 'previsoes_balanceado')
+    tvr.Gera_Tabela_Latex_Previsoes(previsoes, rodada)
