@@ -56,10 +56,10 @@ from sklearn.metrics import accuracy_score
 from sklearn.metrics import precision_score
 from sklearn.metrics import recall_score
 from sklearn.metrics import roc_auc_score
+from sklearn.metrics import average_precision_score
 from sklearn.metrics import f1_score
 from sklearn.metrics import precision_recall_curve
-from sklearn.metrics import plot_precision_recall_curve
-from sklearn.metrics import plot_roc_curve
+from sklearn.metrics import roc_curve
 from sklearn.metrics import classification_report
 
 from sklearn.exceptions import ConvergenceWarning
@@ -335,6 +335,10 @@ for rodada in dados:
     tvr.Gera_Tabela_Latex_Previsoes(previsoes, rodada)
 
     tv.Gera_Figura_Feature_Importance(classificadores[0], rodada, feature_names)
+    
+    # iteracao nos classificadores, fazendo previsao, calcula precision_recall_curve e roc_curve
+    # coloca num dict e passa pra funcao
+    #Gera_Figura_Precision_Recall
 
 ############ OTIMIZAÇÃO #########################################################################
     # sum(negative instances) / sum(positive instances)
@@ -342,6 +346,8 @@ for rodada in dados:
     # vamos utilizar 20, 10, 5, 1
 
     previsoes[rodada] = {}
+    resultados = []
+    resultado = {}
     for clf in classificadores:
         neg_pos_rate = 20
         # espaco de busca
@@ -472,6 +478,7 @@ for rodada in dados:
         clf_pred_proba_test = clf.predict_proba(X_test)
         acc, prec, rec, spec, f_m = tv.calcula_scores(y_test, clf_pred_test)
         auc = roc_auc_score(y_test, clf_pred_proba_test[:,1])
+        aucpr = average_precision_score(y_test, clf_pred_proba_test[:,1])
         previsoes[rodada][type(clf).__name__] = {'ACU': "{:.3f}".format(acc),
                                         'SEN':"{:.3f}".format(rec),
                                         'ESP':"{:.3f}".format(spec),
@@ -479,11 +486,17 @@ for rodada in dados:
                                         'F-measure':"{:.3f}".format(f_m),
                                         'AUC': "{:.3f}".format(auc)
                                     }
-
+        resultado['classificador'] = type(clf).__name__
+        resultado['auc'] = "{:.3f}".format(auc)
+        resultado['aucpr'] = "{:.3f}".format(aucpr)
+        resultado['fpr'], resultado['tpr'], _ = roc_curve(y_test, clf_pred_proba_test[:,1])
+        resultado['precision'], resultado['recall'], _ = precision_recall_curve(y_test, clf_pred_proba_test[:,1])
+        resultados.append(resultado.copy())
 ########### GERA TABELA COM RESULTADOS DESBALANCEADOS OTIMIZADOS ####################
     tv.Save_Obj(previsoes, 'previsoes_otimizado_'+rodada)
     tvr.Gera_Tabela_Latex_Previsoes(previsoes['all'], rodada+'_otimizado')
-
+    tvr.Gera_Figura_Curva_Roc(resultados, rodada+'_otimizado')
+    tvr.Gera_Figura_Curva_Prec_Rec(resultados, rodada+'_otimizado')
     # plotting the results of optimization
     tv.Gera_Figura_Hiperopt_Otimizacao(hyperopt_results, rodada)
 
@@ -491,7 +504,7 @@ for rodada in dados:
     sm = SMOTE(random_state=seed)
     nm = NearMiss()
     smnm = imbpipe(steps=[('smote', sm), ('nearmiss', nm) ])
-
+    print("RODADA DE RESAMPLING - {}".format(rodada))
     resamplers=[sm, nm, smnm]
     previsoes[rodada] = {}
     for i in neg_pos:
@@ -500,7 +513,7 @@ for rodada in dados:
 
         previsoes[rodada][str(i)+'x1'] = {}
         for sampler in resamplers:
-            
+            print("RESAMPLER - {}".format(type(sampler).__name__))
             if(type(sampler).__name__ == 'Pipeline'):
                 sampler.set_params(steps=[('smote', sm), ('nearmiss', nm)])
             else:
@@ -511,6 +524,7 @@ for rodada in dados:
             
             previsoes[rodada][str(i)+'x1'][type(sampler).__name__] = {}
             for clf in classificadores:
+                print("RESAMPLER - {} - CLASSIFICADOR {}".format(type(sampler).__name__, type(clf).__name__))
                 if type(clf).__name__ == 'XGBClassifier':
                     
                     clf.set_params(scale_pos_weight=i)
