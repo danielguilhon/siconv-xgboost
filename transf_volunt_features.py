@@ -289,20 +289,6 @@ def Dados_Balanceados_SMOTE_NearMiss_Sem_Municipio_Orgao():
     dump_svmlight_file(X_res_new, y_res_new, 'smote_nearmiss_1_1_onehot_sem_municipio_orgao.svm') 
 
 #%%####################################################################
-def Gera_Treino_Teste(qtde, caract):
-
-    feature_names = tv.Load_Obj('feature_names_' + caract)
-    X_data, y_data = load_svmlight_file('desbalanceado_' + caract + '.svm', n_features = len(feature_names))# pylint: disable=unbalanced-tuple-unpacking
-    # executa a normalizacao dos dados
-    scaler = StandardScaler(with_mean=False)
-    X_data = scaler.fit_transform(X_data)
-
-    for i in range(qtde):
-        #faz o split entre treino/validacao e teste
-        #stratify mantem a proporcao entre classes pos/neg
-        X_train_cv, X_test, y_train_cv, y_test = train_test_split(X_data, y_data, test_size=0.1, random_state=np.random.RandomState(), stratify=y_data)
-
-#%%####################################################################
 def Gera_Figura_Feature_Importance(classificador, nome, feature_names):
     total = 10
     fig = plt.figure(figsize=(10,6))
